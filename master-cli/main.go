@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -16,15 +17,28 @@ import (
 	"github.com/AlecAivazis/survey/v2"
 )
 
-const (
-	defaultAccountAPIURL = "https://account-service-production-8482.up.railway.app"
-	defaultBankingAPIURL = "https://ledger-service-production-817a.up.railway.app"
-)
-
 var (
 	jwtToken string
 	userRole string
+
+	// URLs from environment variables with fallback
+	accountAPIURL string
+	bankingAPIURL string
+
+	// Email validation regex
+	emailRegex = regexp.MustCompile(`^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}$`)
 )
+
+func init() {
+	accountAPIURL = os.Getenv("ACCOUNT_SERVICE_URL")
+	if accountAPIURL == "" {
+		accountAPIURL = "http://localhost:8080"
+	}
+	bankingAPIURL = os.Getenv("LEDGER_SERVICE_URL")
+	if bankingAPIURL == "" {
+		bankingAPIURL = "http://localhost:8483"
+	}
+}
 
 func main() {
 	fmt.Println("========================================")
@@ -109,20 +123,35 @@ func performInteractiveLogin() {
 	promptEmail := &survey.Input{
 		Message: "Courriel administrateur:",
 	}
-	survey.AskOne(promptEmail, &email)
+	if err := survey.AskOne(promptEmail, &email); err != nil {
+		fmt.Println("Erreur de saisie.")
+		return
+	}
 
 	promptPassword := &survey.Password{
 		Message: "Mot de passe:",
 	}
-	survey.AskOne(promptPassword, &password)
+	if err := survey.AskOne(promptPassword, &password); err != nil {
+		fmt.Println("Erreur de saisie.")
+		return
+	}
 
 	payload := map[string]interface{}{
 		"email":    strings.TrimSpace(email),
 		"password": strings.TrimSpace(password),
 	}
 
-	jsonData, _ := json.Marshal(payload)
-	req, _ := http.NewRequest("POST", defaultAccountAPIURL+"/admin/login", bytes.NewBuffer(jsonData))
+	jsonData, err := json.Marshal(payload)
+	if err != nil {
+		fmt.Println("Erreur interne.")
+		return
+	}
+
+	req, err := http.NewRequest("POST", accountAPIURL+"/admin/login", bytes.NewBuffer(jsonData))
+	if err != nil {
+		fmt.Println("Erreur de requête.")
+		return
+	}
 	req.Header.Set("Content-Type", "application/json")
 
 	client := &http.Client{Timeout: 10 * time.Second}
@@ -137,7 +166,10 @@ func performInteractiveLogin() {
 
 	if resp.StatusCode == http.StatusOK {
 		var result map[string]string
-		json.NewDecoder(resp.Body).Decode(&result)
+		if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+			fmt.Println("ÉCHEC (Réponse invalide)")
+			return
+		}
 
 		jwtToken = result["token"]
 		userRole = result["role"]
@@ -150,13 +182,13 @@ func performInteractiveLogin() {
 
 func checkServerStatus() {
 	client := &http.Client{Timeout: 5 * time.Second}
-	fmt.Print("Pinging Railway Server... ")
+	fmt.Print("Pinging Server... ")
 
 	var resp *http.Response
 	var err error
 
 	for i := 0; i < 3; i++ {
-		resp, err = client.Get(defaultAccountAPIURL + "/health")
+		resp, err = client.Get(accountAPIURL + "/health")
 		if err == nil && resp.StatusCode == http.StatusOK {
 			break
 		}
@@ -184,23 +216,29 @@ func checkServerStatus() {
 
 func interactiveCreateAccount() {
 	fmt.Println("\n--- Assistant de Provisionnement de Compte ---")
-	
+
 	// 1. Email et Nom
 	var email string
-	survey.AskOne(&survey.Input{Message: "Adresse courriel du client:"}, &email)
-	
-	if !strings.Contains(email, "@") || !strings.Contains(email, ".") {
+	if err := survey.AskOne(&survey.Input{Message: "Adresse courriel du client:"}, &email); err != nil {
+		return
+	}
+
+	if !emailRegex.MatchString(email) {
 		fmt.Println("Erreur: Adresse courriel invalide. Annulation.")
 		return
 	}
 
 	var name string
-	survey.AskOne(&survey.Input{Message: "Nom complet du client:"}, &name)
+	if err := survey.AskOne(&survey.Input{Message: "Nom complet du client:"}, &name); err != nil {
+		return
+	}
 
 	// 2. Date de naissance & Calcul de l'âge
 	var dob string
 	for {
-		survey.AskOne(&survey.Input{Message: "Date de naissance (AAAA-MM-JJ):"}, &dob)
+		if err := survey.AskOne(&survey.Input{Message: "Date de naissance (AAAA-MM-JJ):"}, &dob); err != nil {
+			return
+		}
 		age, err := calculateAge(dob)
 		if err != nil {
 			fmt.Println(" Format invalide. Veuillez utiliser AAAA-MM-JJ.")
@@ -212,10 +250,12 @@ func interactiveCreateAccount() {
 
 	// 3. Région & NAS / SSN
 	var region string
-	survey.AskOne(&survey.Select{
+	if err := survey.AskOne(&survey.Select{
 		Message: "Région de résidence:",
 		Options: []string{"Canada", "États-Unis"},
-	}, &region)
+	}, &region); err != nil {
+		return
+	}
 
 	var sin string
 	sinLabel := "Numéro d'Assurance Sociale (NAS):"
@@ -224,11 +264,13 @@ func interactiveCreateAccount() {
 	}
 
 	for {
-		survey.AskOne(&survey.Input{Message: sinLabel}, &sin)
+		if err := survey.AskOne(&survey.Input{Message: sinLabel}, &sin); err != nil {
+			return
+		}
 		// Nettoyage des tirets et espaces
 		cleanSIN := strings.ReplaceAll(sin, "-", "")
 		cleanSIN = strings.ReplaceAll(cleanSIN, " ", "")
-		
+
 		if !isValidLuhn(cleanSIN) {
 			fmt.Println(" Numéro invalide (Échec de la validation Luhn). Veuillez réessayer.")
 			continue
@@ -240,27 +282,35 @@ func interactiveCreateAccount() {
 
 	// 4. Adresse
 	var addressQuery string
-	survey.AskOne(&survey.Input{Message: "Recherche d'adresse (ex: 1000 de la gauchetiere, montreal):"}, &addressQuery)
-	
+	if err := survey.AskOne(&survey.Input{Message: "Recherche d'adresse (ex: 1000 de la gauchetiere, montreal):"}, &addressQuery); err != nil {
+		return
+	}
+
 	addressOptions := searchOpenStreetMap(addressQuery)
 	var finalAddress string
-	
+
 	if len(addressOptions) > 0 {
-		survey.AskOne(&survey.Select{
+		if err := survey.AskOne(&survey.Select{
 			Message: "Sélectionnez l'adresse validée :",
 			Options: addressOptions,
-		}, &finalAddress)
+		}, &finalAddress); err != nil {
+			return
+		}
 	} else {
 		fmt.Println(" Aucune recommandation trouvée. Saisie manuelle requise.")
-		survey.AskOne(&survey.Input{Message: "Adresse complète:"}, &finalAddress)
+		if err := survey.AskOne(&survey.Input{Message: "Adresse complète:"}, &finalAddress); err != nil {
+			return
+		}
 	}
 
 	// Confirmation finale
 	var confirm bool
-	survey.AskOne(&survey.Confirm{
+	if err := survey.AskOne(&survey.Confirm{
 		Message: "Confirmez-vous la création de ce profil de haute sécurité ?",
 		Default: true,
-	}, &confirm)
+	}, &confirm); err != nil {
+		return
+	}
 
 	if !confirm {
 		fmt.Println("Annulation de l'opération.")
@@ -281,18 +331,24 @@ func interactiveCreateAccount() {
 
 func searchAccount() {
 	var email string
-	survey.AskOne(&survey.Input{Message: "Courriel du compte à rechercher :"}, &email)
+	if err := survey.AskOne(&survey.Input{Message: "Courriel du compte à rechercher :"}, &email); err != nil {
+		return
+	}
 	email = strings.TrimSpace(email)
 	if email == "" {
 		return
 	}
 
-	req, _ := http.NewRequest("GET", defaultAccountAPIURL+"/admin/accounts/search?email="+url.QueryEscape(email), nil)
+	req, err := http.NewRequest("GET", accountAPIURL+"/admin/accounts/search?email="+url.QueryEscape(email), nil)
+	if err != nil {
+		fmt.Println("Erreur de requête.")
+		return
+	}
 	req.Header.Set("Authorization", "Bearer "+jwtToken)
 
 	client := &http.Client{Timeout: 10 * time.Second}
 	fmt.Print("Recherche sécurisée en cours... ")
-	
+
 	resp, err := client.Do(req)
 	if err != nil {
 		fmt.Println("ÉCHEC: Serveur injoignable.")
@@ -317,7 +373,7 @@ func searchAccount() {
 	}
 
 	fmt.Println("SUCCÈS.\n")
-	
+
 	dobStr, _ := acc["dob"].(string)
 	ageStr := dobStr
 	if dobStr != "" {
@@ -327,25 +383,27 @@ func searchAccount() {
 		}
 	}
 
+	// SIN is already masked by the server, display as-is
+	sinDisplay, _ := acc["sin"].(string)
+
 	fmt.Println("=========================================")
 	fmt.Println("             DOSSIER CLIENT              ")
 	fmt.Println("=========================================")
 	fmt.Printf("Courriel     : %v\n", acc["email"])
 	fmt.Printf("Nom Complet  : %v\n", acc["full_name"])
 	fmt.Printf("Naiss. (Âge) : %v\n", ageStr)
-	fmt.Printf("NAS          : %v\n", acc["sin"])
+	fmt.Printf("NAS          : %v\n", sinDisplay)
 	fmt.Printf("Adresse      : %v\n", acc["address"])
 	fmt.Println("=========================================")
 
 	ownerID, ok := acc["id"].(string)
 	if !ok {
-		// Fallback if the API doesn't return the ID explicitly
 		ownerID = ""
 	}
 
 	for {
 		var action string
-		survey.AskOne(&survey.Select{
+		if err := survey.AskOne(&survey.Select{
 			Message: "Action sur ce dossier client :",
 			Options: []string{
 				"Consulter les comptes financiers",
@@ -353,22 +411,30 @@ func searchAccount() {
 				"Fermer un compte financier",
 				"Retour en arrière",
 			},
-		}, &action)
+		}, &action); err != nil {
+			return
+		}
 
 		switch action {
 		case "Consulter les comptes financiers":
 			if ownerID == "" {
-				survey.AskOne(&survey.Input{Message: "Veuillez entrer l'ID du client (owner_id) :"}, &ownerID)
+				if err := survey.AskOne(&survey.Input{Message: "Veuillez entrer l'ID du client (owner_id) :"}, &ownerID); err != nil {
+					continue
+				}
 			}
 			listFinancialAccounts(ownerID)
 		case "Ouvrir un nouveau compte financier":
 			if ownerID == "" {
-				survey.AskOne(&survey.Input{Message: "Veuillez entrer l'ID du client (owner_id) :"}, &ownerID)
+				if err := survey.AskOne(&survey.Input{Message: "Veuillez entrer l'ID du client (owner_id) :"}, &ownerID); err != nil {
+					continue
+				}
 			}
 			createFinancialAccount(ownerID)
 		case "Fermer un compte financier":
 			var accountID string
-			survey.AskOne(&survey.Input{Message: "Veuillez entrer l'ID du compte financier à fermer :"}, &accountID)
+			if err := survey.AskOne(&survey.Input{Message: "Veuillez entrer l'ID du compte financier à fermer :"}, &accountID); err != nil {
+				continue
+			}
 			closeFinancialAccount(accountID)
 		case "Retour en arrière":
 			return
@@ -376,11 +442,28 @@ func searchAccount() {
 	}
 }
 
+// authenticatedRequest creates an HTTP request with JWT auth header for ledger calls
+func authenticatedRequest(method, url string, body io.Reader) (*http.Request, error) {
+	req, err := http.NewRequest(method, url, body)
+	if err != nil {
+		return nil, err
+	}
+	if jwtToken != "" {
+		req.Header.Set("Authorization", "Bearer "+jwtToken)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	return req, nil
+}
+
 func listFinancialAccounts(ownerID string) {
-	req, _ := http.NewRequest("GET", defaultBankingAPIURL+"/ledger/accounts/owner/"+ownerID, nil)
+	req, err := authenticatedRequest("GET", bankingAPIURL+"/ledger/accounts/owner/"+ownerID, nil)
+	if err != nil {
+		fmt.Println("Erreur de requête.")
+		return
+	}
 	client := &http.Client{Timeout: 10 * time.Second}
 	fmt.Print("Récupération des comptes financiers... ")
-	
+
 	resp, err := client.Do(req)
 	if err != nil {
 		fmt.Println("ÉCHEC: Serveur bancaire injoignable.")
@@ -410,25 +493,33 @@ func listFinancialAccounts(ownerID string) {
 	fmt.Println("           COMPTES FINANCIERS            ")
 	fmt.Println("=========================================")
 	for i, acc := range accounts {
-		accID := acc["id"].(string)
-		
+		accID, ok := acc["id"].(string)
+		if !ok {
+			continue
+		}
+
 		// Fetch balance
-		balReq, _ := http.NewRequest("GET", defaultBankingAPIURL+"/ledger/accounts/"+accID, nil)
-		balResp, balErr := client.Do(balReq)
+		balReq, err := authenticatedRequest("GET", bankingAPIURL+"/ledger/accounts/"+accID, nil)
 		var balanceStr string
-		if balErr == nil && balResp.StatusCode == http.StatusOK {
-			var bData map[string]interface{}
-			json.NewDecoder(balResp.Body).Decode(&bData)
-			if balFloat, ok := bData["balance"].(float64); ok {
-				balanceStr = fmt.Sprintf("%.2f %s", balFloat/100.0, acc["currency"])
-			} else {
-				balanceStr = "N/A"
-			}
-			balResp.Body.Close()
-		} else {
-			if balResp != nil {
+		if err == nil {
+			balResp, balErr := client.Do(balReq)
+			if balErr == nil && balResp.StatusCode == http.StatusOK {
+				var bData map[string]interface{}
+				if json.NewDecoder(balResp.Body).Decode(&bData) == nil {
+					if balFloat, ok := bData["balance"].(float64); ok {
+						balanceStr = fmt.Sprintf("%.2f %s", balFloat/100.0, acc["currency"])
+					} else {
+						balanceStr = "N/A"
+					}
+				}
 				balResp.Body.Close()
+			} else {
+				if balResp != nil {
+					balResp.Body.Close()
+				}
+				balanceStr = "Erreur"
 			}
+		} else {
 			balanceStr = "Erreur"
 		}
 
@@ -441,11 +532,15 @@ func listFinancialAccounts(ownerID string) {
 	}
 
 	var accChoice string
-	survey.AskOne(&survey.Input{Message: "Entrez le numéro du compte pour voir les transactions (ou vide pour retourner) :"}, &accChoice)
+	if err := survey.AskOne(&survey.Input{Message: "Entrez le numéro du compte pour voir les transactions (ou vide pour retourner) :"}, &accChoice); err != nil {
+		return
+	}
 	if accChoice != "" {
 		idx, err := strconv.Atoi(accChoice)
 		if err == nil && idx >= 1 && idx <= len(accounts) {
-			viewAccountHistory(accounts[idx-1]["id"].(string))
+			if id, ok := accounts[idx-1]["id"].(string); ok {
+				viewAccountHistory(id)
+			}
 		}
 	}
 }
@@ -456,8 +551,12 @@ func viewAccountHistory(accountID string) {
 	client := &http.Client{Timeout: 10 * time.Second}
 
 	for {
-		urlStr := fmt.Sprintf("%s/ledger/accounts/%s/transactions?page=%d&limit=%d", defaultBankingAPIURL, accountID, page, limit)
-		req, _ := http.NewRequest("GET", urlStr, nil)
+		urlStr := fmt.Sprintf("%s/ledger/accounts/%s/transactions?page=%d&limit=%d", bankingAPIURL, accountID, page, limit)
+		req, err := authenticatedRequest("GET", urlStr, nil)
+		if err != nil {
+			fmt.Println("Erreur de requête.")
+			return
+		}
 		fmt.Printf("\n--- Chargement de la page %d ---\n", page)
 
 		resp, err := client.Do(req)
@@ -502,7 +601,11 @@ func viewAccountHistory(accountID string) {
 				if tx.Direction == "DEBIT" {
 					sign = "-"
 				}
-				fmt.Printf("[%s] %s | %s | %s%.2f\n", date.Format("2006-01-02 15:04"), tx.ID[:8], tx.Type, sign, amountFormatted)
+				idShort := tx.ID
+				if len(idShort) >= 8 {
+					idShort = idShort[:8]
+				}
+				fmt.Printf("[%s] %s | %s | %s%.2f\n", date.Format("2006-01-02 15:04"), idShort, tx.Type, sign, amountFormatted)
 			}
 		}
 		fmt.Println("============================================")
@@ -517,10 +620,12 @@ func viewAccountHistory(accountID string) {
 		}
 		options = append(options, "Quitter l'historique")
 
-		survey.AskOne(&survey.Select{
+		if err := survey.AskOne(&survey.Select{
 			Message: "Navigation :",
 			Options: options,
-		}, &navChoice)
+		}, &navChoice); err != nil {
+			return
+		}
 
 		if navChoice == "Page Suivante" {
 			page++
@@ -537,10 +642,14 @@ func closeFinancialAccount(accountID string) {
 	if accountID == "" {
 		return
 	}
-	req, _ := http.NewRequest("POST", defaultBankingAPIURL+"/ledger/accounts/"+accountID+"/close", nil)
+	req, err := authenticatedRequest("POST", bankingAPIURL+"/ledger/accounts/"+accountID+"/close", nil)
+	if err != nil {
+		fmt.Println("Erreur de requête.")
+		return
+	}
 	client := &http.Client{Timeout: 10 * time.Second}
 	fmt.Print("Fermeture du compte financier... ")
-	
+
 	resp, err := client.Do(req)
 	if err != nil {
 		fmt.Println("ÉCHEC: Serveur bancaire injoignable.")
@@ -593,13 +702,17 @@ func isValidLuhn(number string) bool {
 
 func searchOpenStreetMap(query string) []string {
 	fmt.Print(" Recherche en cours... ")
-	
+
 	client := &http.Client{Timeout: 5 * time.Second}
 	reqURL := fmt.Sprintf("https://nominatim.openstreetmap.org/search?q=%s&format=json&limit=5", url.QueryEscape(query))
-	
-	req, _ := http.NewRequest("GET", reqURL, nil)
+
+	req, err := http.NewRequest("GET", reqURL, nil)
+	if err != nil {
+		fmt.Println("ÉCHEC")
+		return nil
+	}
 	req.Header.Set("User-Agent", "InglisHorizon-MasterCLI/1.0")
-	
+
 	resp, err := client.Do(req)
 	if err != nil || resp.StatusCode != http.StatusOK {
 		fmt.Println("ÉCHEC")
@@ -610,26 +723,35 @@ func searchOpenStreetMap(query string) []string {
 	var results []struct {
 		DisplayName string `json:"display_name"`
 	}
-	
+
 	if err := json.NewDecoder(resp.Body).Decode(&results); err != nil {
 		fmt.Println("ÉCHEC")
 		return nil
 	}
-	
+
 	fmt.Println("Trouvé !")
 	var options []string
 	for _, r := range results {
 		options = append(options, r.DisplayName)
 	}
-	
+
 	// Option fallback
 	options = append(options, "[Saisie Manuelle]")
 	return options
 }
 
 func sendAccountPayload(payload map[string]interface{}) {
-	jsonData, _ := json.Marshal(payload)
-	req, _ := http.NewRequest("POST", defaultAccountAPIURL+"/admin/accounts", bytes.NewBuffer(jsonData))
+	jsonData, err := json.Marshal(payload)
+	if err != nil {
+		fmt.Println("Erreur: Impossible de préparer les données.")
+		return
+	}
+
+	req, err := http.NewRequest("POST", accountAPIURL+"/admin/accounts", bytes.NewBuffer(jsonData))
+	if err != nil {
+		fmt.Println("Erreur: Impossible de créer la requête.")
+		return
+	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+jwtToken)
 
@@ -637,7 +759,6 @@ func sendAccountPayload(payload map[string]interface{}) {
 	fmt.Print("\nConnexion au serveur sécurisé... ")
 
 	var resp *http.Response
-	var err error
 	for attempt := 1; attempt <= 3; attempt++ {
 		resp, err = client.Do(req)
 		if err == nil && resp.StatusCode < 500 {
@@ -656,30 +777,35 @@ func sendAccountPayload(payload map[string]interface{}) {
 	}
 	defer resp.Body.Close()
 
-	bodyBytes, _ := io.ReadAll(resp.Body)
+	bodyBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		fmt.Println("\nÉCHEC: Impossible de lire la réponse.")
+		return
+	}
 
 	if resp.StatusCode == http.StatusCreated || resp.StatusCode == http.StatusOK {
 		fmt.Println("SUCCÈS !")
 		newID := string(bodyBytes)
 		fmt.Printf("UUID Sécurisé: %s\n\n", newID)
-		// Removed automatic createLedgerAccount call
 	} else {
 		fmt.Println("ÉCHEC.")
 		var errData map[string]interface{}
 		if json.Unmarshal(bodyBytes, &errData) == nil && errData["message"] != nil {
 			fmt.Printf("Raison: %v\n\n", errData["message"])
 		} else {
-			fmt.Printf("Code HTTP: %d\nDétails bruts: %s\n\n", resp.StatusCode, string(bodyBytes))
+			fmt.Printf("Code HTTP: %d\n\n", resp.StatusCode)
 		}
 	}
 }
 
 func createFinancialAccount(ownerID string) {
 	var createFinancial bool
-	survey.AskOne(&survey.Confirm{
+	if err := survey.AskOne(&survey.Confirm{
 		Message: "Voulez-vous ouvrir un compte financier pour cet utilisateur ?",
 		Default: true,
-	}, &createFinancial)
+	}, &createFinancial); err != nil {
+		return
+	}
 
 	if !createFinancial {
 		return
@@ -688,21 +814,27 @@ func createFinancialAccount(ownerID string) {
 	var currency, accType string
 	var apr float64
 
-	survey.AskOne(&survey.Select{
+	if err := survey.AskOne(&survey.Select{
 		Message: "Devise du compte (ISO 4217) :",
 		Options: []string{"CAD", "USD", "EUR", "JPY"},
 		Default: "CAD",
-	}, &currency)
+	}, &currency); err != nil {
+		return
+	}
 
-	survey.AskOne(&survey.Select{
+	if err := survey.AskOne(&survey.Select{
 		Message: "Type de compte :",
 		Options: []string{"DEPOSIT (Débit/Dépôt)", "CREDIT (Marge/Carte)"},
-	}, &accType)
+	}, &accType); err != nil {
+		return
+	}
 
 	if strings.HasPrefix(accType, "CREDIT") {
 		accType = "CREDIT"
 		var aprStr string
-		survey.AskOne(&survey.Input{Message: "Taux d'intérêt annuel (APR) % (ex: 19.99) :"}, &aprStr)
+		if err := survey.AskOne(&survey.Input{Message: "Taux d'intérêt annuel (APR) % (ex: 19.99) :"}, &aprStr); err != nil {
+			return
+		}
 		fmt.Sscanf(aprStr, "%f", &apr)
 	} else {
 		accType = "DEPOSIT"
@@ -715,13 +847,21 @@ func createFinancialAccount(ownerID string) {
 		"apr":          apr,
 	}
 
-	jsonData, _ := json.Marshal(payload)
-	req, _ := http.NewRequest("POST", defaultBankingAPIURL+"/ledger/accounts", bytes.NewBuffer(jsonData))
-	req.Header.Set("Content-Type", "application/json")
+	jsonData, err := json.Marshal(payload)
+	if err != nil {
+		fmt.Println("Erreur interne.")
+		return
+	}
+
+	req, err := authenticatedRequest("POST", bankingAPIURL+"/ledger/accounts", bytes.NewBuffer(jsonData))
+	if err != nil {
+		fmt.Println("Erreur de requête.")
+		return
+	}
 
 	client := &http.Client{Timeout: 10 * time.Second}
 	fmt.Print("\nCréation du compte au système bancaire central... ")
-	
+
 	resp, err := client.Do(req)
 	if err != nil {
 		fmt.Println("ÉCHEC: Serveur bancaire injoignable.")

@@ -26,5 +26,10 @@ go.work.sum
 .DS_Store
 Thumbs.db
 
-# Any temporary scratch files
+# Scratch and debug files
 scratch.go
+scratch_*.go
+
+# Compiled binaries - NEVER commit these
+inglis.exe
+test.exe

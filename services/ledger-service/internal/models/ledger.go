@@ -171,6 +171,34 @@ func Transfer(ctx context.Context, db *pgxpool.Pool, fromAccountID, toAccountID 
 	}
 	defer tx.Rollback(ctx)
 
+	// 0. Check if sender account is active and has sufficient balance for DEPOSIT accounts
+	var accType, accStatus string
+	err = tx.QueryRow(ctx, "SELECT account_type, status FROM financial_accounts WHERE id = $1 FOR UPDATE", fromAccountID).Scan(&accType, &accStatus)
+	if err != nil {
+		return fmt.Errorf("sender account not found")
+	}
+	if accStatus == "CLOSED" {
+		return fmt.Errorf("sender account is closed")
+	}
+
+	// For DEPOSIT accounts, verify sufficient balance
+	if accType == "DEPOSIT" {
+		var balance int64
+		balQuery := `
+			SELECT 
+				COALESCE(SUM(CASE WHEN direction = 'CREDIT' THEN amount ELSE 0 END), 0) -
+				COALESCE(SUM(CASE WHEN direction = 'DEBIT' THEN amount ELSE 0 END), 0)
+			FROM entries WHERE account_id = $1
+		`
+		err = tx.QueryRow(ctx, balQuery, fromAccountID).Scan(&balance)
+		if err != nil {
+			return fmt.Errorf("failed to check balance")
+		}
+		if balance < amount {
+			return fmt.Errorf("insufficient funds")
+		}
+	}
+
 	// 1. Create Transaction record
 	var txID string
 	err = tx.QueryRow(ctx, "INSERT INTO transactions (idempotency_key, type) VALUES ($1, 'TRANSFER') RETURNING id", idempotencyKey).Scan(&txID)

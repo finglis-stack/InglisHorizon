@@ -4,9 +4,11 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
+	"crypto/subtle"
 	"encoding/hex"
 	"fmt"
 	"log"
+	"os"
 	"strings"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -58,9 +60,7 @@ func CompareHashAndPassword(storedHash, password string) error {
 
 	hash := pbkdf2.Key([]byte(password), salt, pbkdf2Iterations, keyLength, sha256.New)
 
-	// Constant time compare is recommended, but a simple byte compare works for now
-	// as pbkdf2 time dominates.
-	if fmt.Sprintf("%x", hash) != fmt.Sprintf("%x", expectedHash) {
+	if subtle.ConstantTimeCompare(hash, expectedHash) != 1 {
 		return fmt.Errorf("password mismatch")
 	}
 

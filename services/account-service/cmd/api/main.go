@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"account-service/internal/crypto"
@@ -16,8 +17,8 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// JWT Secret Key
-var jwtSecretKey = []byte(os.Getenv("PII_MASTER_KEY_B64"))
+// JWT Secret Key - separate from PII encryption key
+var jwtSecretKey = []byte(os.Getenv("JWT_SECRET_KEY"))
 
 type AccountRequest struct {
 	Email    string `json:"email"`
@@ -35,6 +36,44 @@ type LoginRequest struct {
 type Claims struct {
 	Role string `json:"role"`
 	jwt.RegisteredClaims
+}
+
+// Simple rate limiter for login attempts
+var (
+	loginAttempts    = make(map[string]int)
+	loginLockout     = make(map[string]time.Time)
+	loginMu          sync.Mutex
+	maxLoginAttempts = 5
+	lockoutDuration  = 15 * time.Minute
+)
+
+func checkRateLimit(email string) bool {
+	loginMu.Lock()
+	defer loginMu.Unlock()
+	if lockoutTime, exists := loginLockout[email]; exists {
+		if time.Now().Before(lockoutTime) {
+			return false
+		}
+		delete(loginLockout, email)
+		delete(loginAttempts, email)
+	}
+	return true
+}
+
+func recordFailedLogin(email string) {
+	loginMu.Lock()
+	defer loginMu.Unlock()
+	loginAttempts[email]++
+	if loginAttempts[email] >= maxLoginAttempts {
+		loginLockout[email] = time.Now().Add(lockoutDuration)
+	}
+}
+
+func clearLoginAttempts(email string) {
+	loginMu.Lock()
+	defer loginMu.Unlock()
+	delete(loginAttempts, email)
+	delete(loginLockout, email)
 }
 
 // Middleware to verify JWT and check required roles
@@ -79,8 +118,11 @@ func rbacMiddleware(requiredRoles []string, next http.HandlerFunc) http.HandlerF
 func main() {
 	log.Println("Starting Account Service API...")
 
+	if os.Getenv("JWT_SECRET_KEY") == "" {
+		log.Fatal("FATAL: JWT_SECRET_KEY is not set. Cannot start without JWT secret.")
+	}
 	if os.Getenv("PII_MASTER_KEY_B64") == "" {
-		log.Println("WARNING: PII_MASTER_KEY_B64 is not set. JWT Secret will be empty.")
+		log.Fatal("FATAL: PII_MASTER_KEY_B64 is not set. Cannot start without encryption key.")
 	}
 
 	databaseURL := os.Getenv("DATABASE_URL")
@@ -116,19 +158,31 @@ func main() {
 			return
 		}
 
+		if !checkRateLimit(req.Email) {
+			http.Error(w, `{"message":"Too many login attempts. Please try again later."}`, http.StatusTooManyRequests)
+			return
+		}
+
 		admin, err := models.GetAdminByEmail(context.Background(), pool, req.Email)
 		if err != nil {
+			log.Printf("AUDIT: Failed login attempt for %s", req.Email)
+			recordFailedLogin(req.Email)
 			http.Error(w, `{"message":"Invalid credentials"}`, http.StatusUnauthorized)
 			return
 		}
 
 		err = models.CompareHashAndPassword(admin.PasswordHash, req.Password)
 		if err != nil {
+			log.Printf("AUDIT: Failed login attempt for %s", req.Email)
+			recordFailedLogin(req.Email)
 			http.Error(w, `{"message":"Invalid credentials"}`, http.StatusUnauthorized)
 			return
 		}
 
-		expirationTime := time.Now().Add(12 * time.Hour)
+		clearLoginAttempts(req.Email)
+		log.Printf("AUDIT: Admin login successful for %s (role: %s)", req.Email, admin.Role)
+
+		expirationTime := time.Now().Add(30 * time.Minute)
 		claims := &Claims{
 			Role: admin.Role,
 			RegisteredClaims: jwt.RegisteredClaims{
@@ -191,6 +245,7 @@ func main() {
 			return
 		}
 
+		log.Printf("AUDIT: Account created with ID %s by authenticated admin", newID)
 		w.WriteHeader(http.StatusCreated)
 		w.Write([]byte(newID))
 	}))
@@ -202,6 +257,8 @@ func main() {
 			http.Error(w, `{"message":"Email query parameter is required"}`, http.StatusBadRequest)
 			return
 		}
+
+		log.Printf("AUDIT: Account search performed for email %s", email)
 
 		var acc models.Account
 		query := `SELECT id, email, encrypted_full_name, encrypted_sin, encrypted_address, encrypted_dob FROM secure_accounts WHERE email = $1`
@@ -219,7 +276,10 @@ func main() {
 
 		// Decrypt in memory
 		acc.FullName, _ = crypto.Decrypt(acc.EncryptedFullName, key)
-		acc.SIN, _ = crypto.Decrypt(acc.EncryptedSIN, key)
+		fullSIN, _ := crypto.Decrypt(acc.EncryptedSIN, key)
+		if len(fullSIN) >= 3 {
+			acc.SIN = strings.Repeat("*", len(fullSIN)-3) + fullSIN[len(fullSIN)-3:]
+		}
 		acc.Address, _ = crypto.Decrypt(acc.EncryptedAddress, key)
 		acc.DOB, _ = crypto.Decrypt(acc.EncryptedDOB, key)
 

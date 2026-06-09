@@ -30,11 +30,8 @@ type Account struct {
 
 // CreateTable initializes the secure accounts table in PostgreSQL
 func CreateTable(ctx context.Context, db *pgxpool.Pool) error {
-	// FLUSH: Drop old table structure
-	_, _ = db.Exec(ctx, "DROP TABLE IF EXISTS secure_accounts;")
-
 	query := `
-	CREATE TABLE secure_accounts (
+	CREATE TABLE IF NOT EXISTS secure_accounts (
 		id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
 		created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
 		updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
