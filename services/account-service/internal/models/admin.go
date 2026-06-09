@@ -8,7 +8,6 @@ import (
 	"encoding/hex"
 	"fmt"
 	"log"
-	"os"
 	"strings"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -81,7 +80,6 @@ func CreateAdminTableAndSeed(ctx context.Context, db *pgxpool.Pool) error {
 		return err
 	}
 
-	// Check if the master admin exists
 	var count int
 	err = db.QueryRow(ctx, "SELECT COUNT(*) FROM admin_users").Scan(&count)
 	if err != nil {
@@ -89,28 +87,7 @@ func CreateAdminTableAndSeed(ctx context.Context, db *pgxpool.Pool) error {
 	}
 
 	if count == 0 {
-		email := os.Getenv("INITIAL_ADMIN_EMAIL")
-		password := os.Getenv("INITIAL_ADMIN_PASSWORD")
-
-		if email == "" || password == "" {
-			log.Println("WARNING: Database is empty but INITIAL_ADMIN_EMAIL or INITIAL_ADMIN_PASSWORD is not set. Skipping master admin seeding.")
-			return nil
-		}
-
-		log.Println("Database is empty. Seeding the initial Master Admin with PBKDF2-250k...")
-		role := "MANAGER"
-
-		hashStr, err := HashPassword(password)
-		if err != nil {
-			return err
-		}
-
-		insertQuery := `INSERT INTO admin_users (email, password_hash, role) VALUES ($1, $2, $3)`
-		_, err = db.Exec(ctx, insertQuery, email, hashStr, role)
-		if err != nil {
-			return err
-		}
-		log.Println("Master Admin seeded successfully.")
+		log.Println("WARNING: No admin users found. Provision one manually via database.")
 	}
 
 	return nil
