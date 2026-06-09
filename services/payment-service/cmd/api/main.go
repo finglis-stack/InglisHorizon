@@ -73,6 +73,13 @@ func main() {
 			req.IdempotencyKey = uuid.NewString() // Auto-generate if not provided
 		}
 
+		// Capture Client IP
+		ip := r.Header.Get("X-Forwarded-For")
+		if ip == "" {
+			ip = r.RemoteAddr
+		}
+		req.ClientIP = ip
+
 		// Enqueue the payment for asynchronous processing
 		proc.EnqueuePayment(req)
 
@@ -102,6 +109,12 @@ func main() {
 		if req.IdempotencyKey == "" {
 			req.IdempotencyKey = uuid.NewString() // Auto-generate if not provided
 		}
+
+		ip := r.Header.Get("X-Forwarded-For")
+		if ip == "" {
+			ip = r.RemoteAddr
+		}
+		req.ClientIP = ip
 
 		proc.EnqueuePayment(req)
 

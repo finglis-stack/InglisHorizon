@@ -16,6 +16,7 @@ type PaymentRequest struct {
 	ToAccountID    string `json:"to_account_id"`
 	Amount         int64  `json:"amount"`
 	IdempotencyKey string `json:"idempotency_key"`
+	ClientIP       string `json:"client_ip"`
 }
 
 type PaymentProcessor struct {
@@ -134,6 +135,11 @@ func (p *PaymentProcessor) processPayment(req PaymentRequest) error {
 		if balance < req.Amount {
 			return fmt.Errorf("insufficient funds (balance: %d, requested: %d)", balance, req.Amount)
 		}
+	}
+
+	// 2.5 Anti-Fraud Engine
+	if err := p.CheckAntiFraud(ctx, tx, req, fromAccountID); err != nil {
+		return fmt.Errorf("BLOCKED BY ANTIFRAUD: %v", err)
 	}
 
 	// 3. Execution Phase: Immutable double-entry accounting
