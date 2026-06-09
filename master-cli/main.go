@@ -32,11 +32,11 @@ var (
 func init() {
 	accountAPIURL = os.Getenv("ACCOUNT_SERVICE_URL")
 	if accountAPIURL == "" {
-		accountAPIURL = "http://localhost:8080"
+		accountAPIURL = "https://account-service-production-24ae.up.railway.app"
 	}
 	bankingAPIURL = os.Getenv("LEDGER_SERVICE_URL")
 	if bankingAPIURL == "" {
-		bankingAPIURL = "http://localhost:8483"
+		bankingAPIURL = "https://ledger-service-production-7bdc.up.railway.app"
 	}
 }
 
