@@ -22,9 +22,10 @@ var (
 	userRole string
 
 	// URLs from environment variables with fallback
-	accountAPIURL string
-	bankingAPIURL string
-	paymentAPIURL string
+	accountAPIURL   string
+	bankingAPIURL   string
+	paymentAPIURL   string
+	antifraudAPIURL string
 
 	// Email validation regex
 	emailRegex = regexp.MustCompile(`^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}$`)
@@ -42,6 +43,10 @@ func init() {
 	paymentAPIURL = os.Getenv("PAYMENT_SERVICE_URL")
 	if paymentAPIURL == "" {
 		paymentAPIURL = "https://payment.inglishorizon.com"
+	}
+	antifraudAPIURL = os.Getenv("ANTIFRAUD_SERVICE_URL")
+	if antifraudAPIURL == "" {
+		antifraudAPIURL = "https://antifraud.inglishorizon.com"
 	}
 }
 
@@ -430,6 +435,7 @@ func searchAccount() {
 				"Consulter les comptes financiers",
 				"Ouvrir un nouveau compte financier",
 				"Fermer un compte financier",
+				"Voir les analyses anti-fraude",
 				"Retour en arrière",
 			},
 		}, &action); err != nil {
@@ -451,6 +457,8 @@ func searchAccount() {
 				}
 			}
 			createFinancialAccount(ownerID)
+		case "Voir les analyses anti-fraude":
+			viewAntifraudLogs(acc["email"].(string))
 		case "Fermer un compte financier":
 			var accountID string
 			if err := survey.AskOne(&survey.Input{Message: "Veuillez entrer l'ID du compte financier à fermer :"}, &accountID); err != nil {
@@ -563,6 +571,54 @@ func listFinancialAccounts(ownerID string) {
 				viewAccountHistory(id)
 			}
 		}
+	}
+}
+
+func viewAntifraudLogs(email string) {
+	fmt.Println("\n--- Historique des analyses anti-fraude ---")
+	client := &http.Client{Timeout: 10 * time.Second}
+	// We use the ANTIFRAUD_API_URL or fallback. We can construct it based on the env.
+	// For now we'll assume antifraudAPIURL exists. Let's add it at the top of the file.
+	req, err := authenticatedRequest("GET", antifraudAPIURL+"/logs/"+url.QueryEscape(email), nil)
+	if err != nil {
+		fmt.Println("Erreur: Impossible de créer la requête.")
+		return
+	}
+
+	resp, err := client.Do(req)
+	if err != nil {
+		fmt.Println("ÉCHEC: Serveur anti-fraude injoignable.")
+		return
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		fmt.Printf("ÉCHEC (Code %d).\n", resp.StatusCode)
+		return
+	}
+
+	var logs []map[string]interface{}
+	if err := json.NewDecoder(resp.Body).Decode(&logs); err != nil {
+		fmt.Println("ÉCHEC: Données corrompues.")
+		return
+	}
+
+	if len(logs) == 0 {
+		fmt.Println("Aucune analyse anti-fraude trouvée pour ce client.")
+		return
+	}
+
+	for _, l := range logs {
+		status := l["status"]
+		amountFloat, _ := l["amount"].(float64)
+		amount := fmt.Sprintf("%.2f", amountFloat/100.0)
+		dateStr, _ := l["created_at"].(string)
+
+		fmt.Printf("[%s] Montant: %s | Statut: %v\n", dateStr, amount, status)
+		if status == "BLOCKED" {
+			fmt.Printf("   Raison: %v\n", l["reason"])
+		}
+		fmt.Println("-----------------------------------------")
 	}
 }
 

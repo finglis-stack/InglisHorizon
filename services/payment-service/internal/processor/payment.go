@@ -1,9 +1,13 @@
 package processor
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
+	"net/http"
+	"os"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -137,9 +141,31 @@ func (p *PaymentProcessor) processPayment(req PaymentRequest) error {
 		}
 	}
 
-	// 2.5 Anti-Fraud Engine
-	if err := p.CheckAntiFraud(ctx, tx, req, fromAccountID); err != nil {
-		return fmt.Errorf("BLOCKED BY ANTIFRAUD: %v", err)
+	// 2.5 Anti-Fraud Engine via HTTP
+	antifraudURL := os.Getenv("ANTIFRAUD_SERVICE_URL")
+	if antifraudURL != "" {
+		payload, _ := json.Marshal(req)
+		httpReq, err := http.NewRequestWithContext(ctx, "POST", antifraudURL+"/analyze", bytes.NewBuffer(payload))
+		if err == nil {
+			httpReq.Header.Set("Content-Type", "application/json")
+			client := &http.Client{Timeout: 5 * time.Second}
+			resp, err := client.Do(httpReq)
+			if err == nil {
+				var result map[string]interface{}
+				json.NewDecoder(resp.Body).Decode(&result)
+				resp.Body.Close()
+
+				if status, ok := result["status"].(string); ok && status == "BLOCKED" {
+					reason := "Unknown reason"
+					if r, ok := result["reason"].(string); ok {
+						reason = r
+					}
+					return fmt.Errorf("BLOCKED BY ANTIFRAUD: %v", reason)
+				}
+			} else {
+				log.Printf("Warning: Could not reach antifraud service: %v", err)
+			}
+		}
 	}
 
 	// 3. Execution Phase: Immutable double-entry accounting
