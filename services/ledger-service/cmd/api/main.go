@@ -6,10 +6,11 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strconv"
 	"time"
 
-	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/finglis-stack/InglisHorizon/services/ledger-service/internal/models"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 var pool *pgxpool.Pool
@@ -77,6 +78,50 @@ func main() {
 		})
 	})
 
+	// GET /ledger/accounts/owner/{owner_id}
+	mux.HandleFunc("GET /ledger/accounts/owner/{owner_id}", func(w http.ResponseWriter, r *http.Request) {
+		ownerID := r.PathValue("owner_id")
+		if ownerID == "" {
+			http.Error(w, `{"message":"Invalid owner ID"}`, http.StatusBadRequest)
+			return
+		}
+		accounts, err := models.GetAccountsByOwner(r.Context(), pool, ownerID)
+		if err != nil {
+			http.Error(w, `{"message":"Failed to retrieve accounts", "error":"`+err.Error()+`"}`, http.StatusInternalServerError)
+			return
+		}
+		json.NewEncoder(w).Encode(accounts)
+	})
+
+	// GET /ledger/accounts/{id}/transactions
+	mux.HandleFunc("GET /ledger/accounts/{id}/transactions", func(w http.ResponseWriter, r *http.Request) {
+		id := r.PathValue("id")
+		if id == "" {
+			http.Error(w, `{"message":"Invalid account ID"}`, http.StatusBadRequest)
+			return
+		}
+		page, _ := strconv.Atoi(r.URL.Query().Get("page"))
+		if page < 1 {
+			page = 1
+		}
+		limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+		if limit < 1 || limit > 100 {
+			limit = 10
+		}
+		offset := (page - 1) * limit
+
+		txs, err := models.GetTransactions(r.Context(), pool, id, limit, offset)
+		if err != nil {
+			http.Error(w, `{"message":"Failed to retrieve transactions", "error":"`+err.Error()+`"}`, http.StatusInternalServerError)
+			return
+		}
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"page":         page,
+			"limit":        limit,
+			"transactions": txs,
+		})
+	})
+
 	// POST /ledger/transfer
 	mux.HandleFunc("POST /ledger/transfer", func(w http.ResponseWriter, r *http.Request) {
 		var req struct {
@@ -96,6 +141,21 @@ func main() {
 			return
 		}
 		json.NewEncoder(w).Encode(map[string]string{"message": "Transfer successful"})
+	})
+
+	// POST /ledger/accounts/{id}/close
+	mux.HandleFunc("POST /ledger/accounts/{id}/close", func(w http.ResponseWriter, r *http.Request) {
+		id := r.PathValue("id")
+		if id == "" {
+			http.Error(w, `{"message":"Invalid account ID"}`, http.StatusBadRequest)
+			return
+		}
+		err := models.CloseAccount(r.Context(), pool, id)
+		if err != nil {
+			http.Error(w, `{"message":"Failed to close account", "error":"`+err.Error()+`"}`, http.StatusInternalServerError)
+			return
+		}
+		json.NewEncoder(w).Encode(map[string]string{"message": "Account successfully marked as CLOSED"})
 	})
 
 	// POST /ledger/cron/interest

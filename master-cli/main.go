@@ -18,7 +18,7 @@ import (
 
 const (
 	defaultAccountAPIURL = "https://account-service-production-8482.up.railway.app"
-	defaultLedgerAPIURL  = "https://ledger-service-production-0679.up.railway.app"
+	defaultBankingAPIURL = "https://ledger-service-production-817a.up.railway.app"
 )
 
 var (
@@ -336,6 +336,223 @@ func searchAccount() {
 	fmt.Printf("NAS          : %v\n", acc["sin"])
 	fmt.Printf("Adresse      : %v\n", acc["address"])
 	fmt.Println("=========================================")
+
+	ownerID, ok := acc["id"].(string)
+	if !ok {
+		// Fallback if the API doesn't return the ID explicitly
+		ownerID = ""
+	}
+
+	for {
+		var action string
+		survey.AskOne(&survey.Select{
+			Message: "Action sur ce dossier client :",
+			Options: []string{
+				"Consulter les comptes financiers",
+				"Ouvrir un nouveau compte financier",
+				"Fermer un compte financier",
+				"Retour en arrière",
+			},
+		}, &action)
+
+		switch action {
+		case "Consulter les comptes financiers":
+			if ownerID == "" {
+				survey.AskOne(&survey.Input{Message: "Veuillez entrer l'ID du client (owner_id) :"}, &ownerID)
+			}
+			listFinancialAccounts(ownerID)
+		case "Ouvrir un nouveau compte financier":
+			if ownerID == "" {
+				survey.AskOne(&survey.Input{Message: "Veuillez entrer l'ID du client (owner_id) :"}, &ownerID)
+			}
+			createFinancialAccount(ownerID)
+		case "Fermer un compte financier":
+			var accountID string
+			survey.AskOne(&survey.Input{Message: "Veuillez entrer l'ID du compte financier à fermer :"}, &accountID)
+			closeFinancialAccount(accountID)
+		case "Retour en arrière":
+			return
+		}
+	}
+}
+
+func listFinancialAccounts(ownerID string) {
+	req, _ := http.NewRequest("GET", defaultBankingAPIURL+"/ledger/accounts/owner/"+ownerID, nil)
+	client := &http.Client{Timeout: 10 * time.Second}
+	fmt.Print("Récupération des comptes financiers... ")
+	
+	resp, err := client.Do(req)
+	if err != nil {
+		fmt.Println("ÉCHEC: Serveur bancaire injoignable.")
+		return
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		fmt.Printf("ÉCHEC (Code %d). Impossible de récupérer les comptes.\n", resp.StatusCode)
+		return
+	}
+
+	var accounts []map[string]interface{}
+	if err := json.NewDecoder(resp.Body).Decode(&accounts); err != nil {
+		fmt.Println("ÉCHEC: Données corrompues.")
+		return
+	}
+
+	fmt.Println("SUCCÈS.\n")
+
+	if len(accounts) == 0 {
+		fmt.Println("Aucun compte financier trouvé pour ce client.")
+		return
+	}
+
+	fmt.Println("=========================================")
+	fmt.Println("           COMPTES FINANCIERS            ")
+	fmt.Println("=========================================")
+	for i, acc := range accounts {
+		accID := acc["id"].(string)
+		
+		// Fetch balance
+		balReq, _ := http.NewRequest("GET", defaultBankingAPIURL+"/ledger/accounts/"+accID, nil)
+		balResp, balErr := client.Do(balReq)
+		var balanceStr string
+		if balErr == nil && balResp.StatusCode == http.StatusOK {
+			var bData map[string]interface{}
+			json.NewDecoder(balResp.Body).Decode(&bData)
+			if balFloat, ok := bData["balance"].(float64); ok {
+				balanceStr = fmt.Sprintf("%.2f %s", balFloat/100.0, acc["currency"])
+			} else {
+				balanceStr = "N/A"
+			}
+			balResp.Body.Close()
+		} else {
+			if balResp != nil {
+				balResp.Body.Close()
+			}
+			balanceStr = "Erreur"
+		}
+
+		fmt.Printf("[%d] ID: %s | Type: %v | Devise: %v | Statut: %v\n", i+1, accID, acc["account_type"], acc["currency"], acc["status"])
+		fmt.Printf("    Solde actuel: %s\n", balanceStr)
+		if acc["account_type"] == "CREDIT" {
+			fmt.Printf("    Taux d'intérêt: %v%%\n", acc["apr"])
+		}
+		fmt.Println("-----------------------------------------")
+	}
+
+	var accChoice string
+	survey.AskOne(&survey.Input{Message: "Entrez le numéro du compte pour voir les transactions (ou vide pour retourner) :"}, &accChoice)
+	if accChoice != "" {
+		idx, err := strconv.Atoi(accChoice)
+		if err == nil && idx >= 1 && idx <= len(accounts) {
+			viewAccountHistory(accounts[idx-1]["id"].(string))
+		}
+	}
+}
+
+func viewAccountHistory(accountID string) {
+	page := 1
+	limit := 10
+	client := &http.Client{Timeout: 10 * time.Second}
+
+	for {
+		urlStr := fmt.Sprintf("%s/ledger/accounts/%s/transactions?page=%d&limit=%d", defaultBankingAPIURL, accountID, page, limit)
+		req, _ := http.NewRequest("GET", urlStr, nil)
+		fmt.Printf("\n--- Chargement de la page %d ---\n", page)
+
+		resp, err := client.Do(req)
+		if err != nil {
+			fmt.Println("ÉCHEC: Serveur bancaire injoignable.")
+			return
+		}
+
+		if resp.StatusCode != http.StatusOK {
+			fmt.Printf("ÉCHEC (Code %d).\n", resp.StatusCode)
+			resp.Body.Close()
+			return
+		}
+
+		var data struct {
+			Page         int `json:"page"`
+			Limit        int `json:"limit"`
+			Transactions []struct {
+				ID        string `json:"id"`
+				Type      string `json:"type"`
+				Direction string `json:"direction"`
+				Amount    int64  `json:"amount"`
+				CreatedAt string `json:"created_at"`
+			} `json:"transactions"`
+		}
+
+		if err := json.NewDecoder(resp.Body).Decode(&data); err != nil {
+			fmt.Println("ÉCHEC: Données corrompues.")
+			resp.Body.Close()
+			return
+		}
+		resp.Body.Close()
+
+		fmt.Printf("=== HISTORIQUE DES TRANSACTIONS (Page %d) ===\n", page)
+		if len(data.Transactions) == 0 {
+			fmt.Println("  (Aucune transaction à afficher sur cette page)")
+		} else {
+			for _, tx := range data.Transactions {
+				date, _ := time.Parse(time.RFC3339, tx.CreatedAt)
+				amountFormatted := float64(tx.Amount) / 100.0
+				sign := "+"
+				if tx.Direction == "DEBIT" {
+					sign = "-"
+				}
+				fmt.Printf("[%s] %s | %s | %s%.2f\n", date.Format("2006-01-02 15:04"), tx.ID[:8], tx.Type, sign, amountFormatted)
+			}
+		}
+		fmt.Println("============================================")
+
+		var navChoice string
+		options := []string{}
+		if page > 1 {
+			options = append(options, "Page Précédente")
+		}
+		if len(data.Transactions) == limit {
+			options = append(options, "Page Suivante")
+		}
+		options = append(options, "Quitter l'historique")
+
+		survey.AskOne(&survey.Select{
+			Message: "Navigation :",
+			Options: options,
+		}, &navChoice)
+
+		if navChoice == "Page Suivante" {
+			page++
+		} else if navChoice == "Page Précédente" {
+			page--
+		} else {
+			break
+		}
+	}
+}
+
+func closeFinancialAccount(accountID string) {
+	accountID = strings.TrimSpace(accountID)
+	if accountID == "" {
+		return
+	}
+	req, _ := http.NewRequest("POST", defaultBankingAPIURL+"/ledger/accounts/"+accountID+"/close", nil)
+	client := &http.Client{Timeout: 10 * time.Second}
+	fmt.Print("Fermeture du compte financier... ")
+	
+	resp, err := client.Do(req)
+	if err != nil {
+		fmt.Println("ÉCHEC: Serveur bancaire injoignable.")
+		return
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusOK {
+		fmt.Println("SUCCÈS. Le compte a été fermé avec succès.")
+	} else {
+		fmt.Printf("ÉCHEC (Code %d). Le compte n'a pas pu être fermé ou est déjà fermé.\n", resp.StatusCode)
+	}
 }
 
 func calculateAge(dobStr string) (int, error) {
@@ -445,7 +662,7 @@ func sendAccountPayload(payload map[string]interface{}) {
 		fmt.Println("SUCCÈS !")
 		newID := string(bodyBytes)
 		fmt.Printf("UUID Sécurisé: %s\n\n", newID)
-		createLedgerAccount(newID)
+		// Removed automatic createLedgerAccount call
 	} else {
 		fmt.Println("ÉCHEC.")
 		var errData map[string]interface{}
@@ -457,14 +674,14 @@ func sendAccountPayload(payload map[string]interface{}) {
 	}
 }
 
-func createLedgerAccount(ownerID string) {
-	var createLedger bool
+func createFinancialAccount(ownerID string) {
+	var createFinancial bool
 	survey.AskOne(&survey.Confirm{
-		Message: "Voulez-vous ouvrir un compte financier (Ledger) pour cet utilisateur ?",
+		Message: "Voulez-vous ouvrir un compte financier pour cet utilisateur ?",
 		Default: true,
-	}, &createLedger)
+	}, &createFinancial)
 
-	if !createLedger {
+	if !createFinancial {
 		return
 	}
 
@@ -499,15 +716,15 @@ func createLedgerAccount(ownerID string) {
 	}
 
 	jsonData, _ := json.Marshal(payload)
-	req, _ := http.NewRequest("POST", defaultLedgerAPIURL+"/ledger/accounts", bytes.NewBuffer(jsonData))
+	req, _ := http.NewRequest("POST", defaultBankingAPIURL+"/ledger/accounts", bytes.NewBuffer(jsonData))
 	req.Header.Set("Content-Type", "application/json")
 
 	client := &http.Client{Timeout: 10 * time.Second}
-	fmt.Print("\nCréation du coffre financier... ")
+	fmt.Print("\nCréation du compte au système bancaire central... ")
 	
 	resp, err := client.Do(req)
 	if err != nil {
-		fmt.Println("ÉCHEC: Serveur Ledger injoignable.")
+		fmt.Println("ÉCHEC: Serveur bancaire injoignable.")
 		return
 	}
 	defer resp.Body.Close()
@@ -517,5 +734,5 @@ func createLedgerAccount(ownerID string) {
 		return
 	}
 
-	fmt.Println("SUCCÈS. Le compte a été activé sur le grand livre.")
+	fmt.Println("SUCCÈS. Le compte a été activé sur le système bancaire.")
 }

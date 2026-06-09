@@ -4,9 +4,26 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 )
+
+type Account struct {
+	ID       string  `json:"id"`
+	Currency string  `json:"currency"`
+	Type     string  `json:"account_type"`
+	Status   string  `json:"status"`
+	APR      float64 `json:"apr"`
+}
+
+type Transaction struct {
+	ID        string    `json:"id"`
+	Type      string    `json:"type"`
+	Direction string    `json:"direction"`
+	Amount    int64     `json:"amount"`
+	CreatedAt time.Time `json:"created_at"`
+}
 
 // InitDB creates the strict financial ledger tables.
 func InitDB(ctx context.Context, db *pgxpool.Pool) error {
@@ -45,7 +62,16 @@ func InitDB(ctx context.Context, db *pgxpool.Pool) error {
 	_, err := db.Exec(ctx, query)
 	if err != nil {
 		log.Printf("Failed to initialize ledger tables: %v", err)
+		return err
 	}
+
+	// Migrate existing tables to add status if not exists
+	alterQuery := `ALTER TABLE financial_accounts ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'ACTIVE';`
+	_, err = db.Exec(ctx, alterQuery)
+	if err != nil {
+		log.Printf("Failed to add status column: %v", err)
+	}
+
 	return err
 }
 
@@ -56,6 +82,39 @@ func CreateAccount(ctx context.Context, db *pgxpool.Pool, ownerID string, curren
 			  VALUES ($1, $2, $3, $4) RETURNING id`
 	err := db.QueryRow(ctx, query, ownerID, currency, accType, apr).Scan(&newID)
 	return newID, err
+}
+
+// GetAccountsByOwner retrieves all financial accounts for a given client.
+func GetAccountsByOwner(ctx context.Context, db *pgxpool.Pool, ownerID string) ([]Account, error) {
+	query := `SELECT id, currency, account_type, status, interest_rate_apr FROM financial_accounts WHERE owner_id = $1 ORDER BY created_at DESC`
+	rows, err := db.Query(ctx, query, ownerID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var accounts []Account
+	for rows.Next() {
+		var a Account
+		if err := rows.Scan(&a.ID, &a.Currency, &a.Type, &a.Status, &a.APR); err != nil {
+			return nil, err
+		}
+		accounts = append(accounts, a)
+	}
+	return accounts, nil
+}
+
+// CloseAccount marks an account as 'CLOSED' instead of deleting it.
+func CloseAccount(ctx context.Context, db *pgxpool.Pool, accountID string) error {
+	query := `UPDATE financial_accounts SET status = 'CLOSED' WHERE id = $1 AND status != 'CLOSED'`
+	tag, err := db.Exec(ctx, query, accountID)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return fmt.Errorf("account not found or already closed")
+	}
+	return nil
 }
 
 // GetBalance calculates the balance dynamically based on all entries.
@@ -70,6 +129,33 @@ func GetBalance(ctx context.Context, db *pgxpool.Pool, accountID string) (int64,
 	var balance int64
 	err := db.QueryRow(ctx, query, accountID).Scan(&balance)
 	return balance, err
+}
+
+// GetTransactions retrieves paginated transaction history for a given account.
+func GetTransactions(ctx context.Context, db *pgxpool.Pool, accountID string, limit, offset int) ([]Transaction, error) {
+	query := `
+		SELECT t.id, t.type, e.direction, e.amount, e.created_at
+		FROM entries e
+		JOIN transactions t ON e.transaction_id = t.id
+		WHERE e.account_id = $1
+		ORDER BY e.created_at DESC
+		LIMIT $2 OFFSET $3
+	`
+	rows, err := db.Query(ctx, query, accountID, limit, offset)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var txs []Transaction
+	for rows.Next() {
+		var tx Transaction
+		if err := rows.Scan(&tx.ID, &tx.Type, &tx.Direction, &tx.Amount, &tx.CreatedAt); err != nil {
+			return nil, err
+		}
+		txs = append(txs, tx)
+	}
+	return txs, nil
 }
 
 // Transfer atomically moves funds between two accounts.
