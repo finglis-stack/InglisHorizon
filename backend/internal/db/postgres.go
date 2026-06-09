@@ -17,7 +17,7 @@ type DB struct {
 
 // Connect initializes a connection pool to PostgreSQL
 func Connect() (*DB, error) {
-	// Railway provides DATABASE_URL in the environment
+	// DATABASE_URL is provided by the hosting environment
 	databaseURL := os.Getenv("DATABASE_URL")
 	if databaseURL == "" {
 		return nil, fmt.Errorf("DATABASE_URL environment variable is not set")
