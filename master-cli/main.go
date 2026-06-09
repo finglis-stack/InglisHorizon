@@ -456,7 +456,7 @@ func authenticatedRequest(method, url string, body io.Reader) (*http.Request, er
 }
 
 func listFinancialAccounts(ownerID string) {
-	req, err := authenticatedRequest("GET", bankingAPIURL+"/ledger/accounts/owner/"+ownerID, nil)
+	req, err := authenticatedRequest("GET", bankingAPIURL+"/ledger/owners/"+ownerID+"/accounts", nil)
 	if err != nil {
 		fmt.Println("Erreur de requête.")
 		return

@@ -163,8 +163,8 @@ func main() {
 		})
 	}))
 
-	// GET /ledger/accounts/owner/{owner_id} - List accounts by owner (authenticated)
-	mux.HandleFunc("GET /ledger/accounts/owner/{owner_id}", authMiddleware([]string{"MANAGER", "SUPPORT"}, func(w http.ResponseWriter, r *http.Request) {
+	// GET /ledger/owners/{owner_id}/accounts - List accounts by owner (authenticated)
+	mux.HandleFunc("GET /ledger/owners/{owner_id}/accounts", authMiddleware([]string{"MANAGER", "SUPPORT"}, func(w http.ResponseWriter, r *http.Request) {
 		ownerID := r.PathValue("owner_id")
 		if !isValidUUID(ownerID) {
 			http.Error(w, `{"message":"Invalid owner ID format"}`, http.StatusBadRequest)
