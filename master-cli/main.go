@@ -18,7 +18,7 @@ import (
 
 const (
 	defaultAccountAPIURL = "https://account-service-production-8482.up.railway.app"
-	defaultLedgerAPIURL  = "http://localhost:8483" // To be updated when deployed to Railway
+	defaultLedgerAPIURL  = "https://ledger-service-production-0679.up.railway.app"
 )
 
 var (
