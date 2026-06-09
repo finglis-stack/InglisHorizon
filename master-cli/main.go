@@ -906,8 +906,20 @@ func createPayment() {
 		return
 	}
 
-	var toAccountID string
-	if err := survey.AskOne(&survey.Input{Message: "ID du compte financier destinataire (UUID):"}, &toAccountID); err != nil {
+	fromAccountID := selectAccountInteractive(payerEmail, "Sélectionnez le compte à DÉBITER (Payeur):")
+	if fromAccountID == "" {
+		fmt.Println("Annulation: Aucun compte débiteur sélectionné.")
+		return
+	}
+
+	var recipientEmail string
+	if err := survey.AskOne(&survey.Input{Message: "Courriel du destinataire:"}, &recipientEmail); err != nil {
+		return
+	}
+
+	toAccountID := selectAccountInteractive(recipientEmail, "Sélectionnez le compte à CRÉDITER (Destinataire):")
+	if toAccountID == "" {
+		fmt.Println("Annulation: Aucun compte destinataire sélectionné.")
 		return
 	}
 
@@ -924,9 +936,10 @@ func createPayment() {
 	amountCents := int64(amountFloat * 100)
 
 	payload := map[string]interface{}{
-		"payer_email":   payerEmail,
-		"to_account_id": toAccountID,
-		"amount":        amountCents,
+		"payer_email":     payerEmail,
+		"from_account_id": fromAccountID,
+		"to_account_id":   toAccountID,
+		"amount":          amountCents,
 	}
 
 	jsonData, err := json.Marshal(payload)
@@ -968,8 +981,14 @@ func createPayment() {
 func createDeposit() {
 	fmt.Println("\n--- Dépôt de fonds (Ajout externe) ---")
 
-	var toAccountID string
-	if err := survey.AskOne(&survey.Input{Message: "ID du compte financier destinataire (UUID):"}, &toAccountID); err != nil {
+	var recipientEmail string
+	if err := survey.AskOne(&survey.Input{Message: "Courriel du compte destinataire:"}, &recipientEmail); err != nil {
+		return
+	}
+
+	toAccountID := selectAccountInteractive(recipientEmail, "Sélectionnez le compte à CRÉDITER:")
+	if toAccountID == "" {
+		fmt.Println("Annulation: Aucun compte destinataire sélectionné.")
 		return
 	}
 
@@ -1025,3 +1044,90 @@ func createDeposit() {
 		fmt.Println("Raison:", string(bodyBytes))
 	}
 }
+
+// Helper to select an account interactively
+func selectAccountInteractive(email string, promptMsg string) string {
+	// 1. Find ownerID
+	email = strings.TrimSpace(email)
+	client := &http.Client{Timeout: 10 * time.Second}
+	req, err := authenticatedRequest("GET", accountAPIURL+"/admin/accounts/search?email="+url.QueryEscape(email), nil)
+	if err != nil {
+		fmt.Println("Erreur: Impossible de créer la requête.")
+		return ""
+	}
+	resp, err := client.Do(req)
+	if err != nil || resp.StatusCode != http.StatusOK {
+		fmt.Println("Erreur: Utilisateur non trouvé.")
+		if resp != nil { resp.Body.Close() }
+		return ""
+	}
+	var uData map[string]interface{}
+	json.NewDecoder(resp.Body).Decode(&uData)
+	resp.Body.Close()
+	ownerID, ok := uData["id"].(string)
+	if !ok || ownerID == "" {
+		fmt.Println("Erreur: ID utilisateur invalide.")
+		return ""
+	}
+
+	// 2. Fetch accounts
+	accReq, err := authenticatedRequest("GET", bankingAPIURL+"/ledger/owners/"+ownerID+"/accounts", nil)
+	if err != nil { return "" }
+	accResp, err := client.Do(accReq)
+	if err != nil || accResp.StatusCode != http.StatusOK {
+		fmt.Println("Erreur: Impossible de récupérer les comptes.")
+		if accResp != nil { accResp.Body.Close() }
+		return ""
+	}
+	var accounts []map[string]interface{}
+	json.NewDecoder(accResp.Body).Decode(&accounts)
+	accResp.Body.Close()
+
+	if len(accounts) == 0 {
+		fmt.Println("Aucun compte financier trouvé pour cet utilisateur.")
+		return ""
+	}
+
+	// 3. Prepare survey options
+	var options []string
+	var accountIDs []string
+
+	for _, acc := range accounts {
+		accID, ok := acc["id"].(string)
+		if !ok { continue }
+
+		// Fetch balance
+		balReq, err := authenticatedRequest("GET", bankingAPIURL+"/ledger/accounts/"+accID, nil)
+		balanceStr := "N/A"
+		if err == nil {
+			balResp, balErr := client.Do(balReq)
+			if balErr == nil && balResp.StatusCode == http.StatusOK {
+				var bData map[string]interface{}
+				if json.NewDecoder(balResp.Body).Decode(&bData) == nil {
+					if balFloat, ok := bData["balance"].(float64); ok {
+						balanceStr = fmt.Sprintf("%.2f", balFloat/100.0)
+					}
+				}
+				balResp.Body.Close()
+			} else {
+				if balResp != nil { balResp.Body.Close() }
+			}
+		}
+
+		opt := fmt.Sprintf("%s - %s (%s) | Solde: %s", acc["account_type"], acc["currency"], acc["status"], balanceStr)
+		options = append(options, opt)
+		accountIDs = append(accountIDs, accID)
+	}
+
+	var choice int
+	prompt := &survey.Select{
+		Message: promptMsg,
+		Options: options,
+	}
+	if err := survey.AskOne(prompt, &choice); err != nil {
+		return ""
+	}
+
+	return accountIDs[choice]
+}
+

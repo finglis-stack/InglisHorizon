@@ -12,6 +12,7 @@ import (
 type PaymentRequest struct {
 	Type           string `json:"type"` // "PAYMENT" or "DEPOSIT"
 	PayerEmail     string `json:"payer_email"`
+	FromAccountID  string `json:"from_account_id"`
 	ToAccountID    string `json:"to_account_id"`
 	Amount         int64  `json:"amount"`
 	IdempotencyKey string `json:"idempotency_key"`
@@ -72,7 +73,7 @@ func (p *PaymentProcessor) processPayment(req PaymentRequest) error {
 		var toStatus string
 		err = tx.QueryRow(ctx, "SELECT status FROM financial_accounts WHERE id = $1 FOR UPDATE", req.ToAccountID).Scan(&toStatus)
 		if err != nil || toStatus == "CLOSED" {
-			return fmt.Errorf("recipient account invalid or closed")
+			return fmt.Errorf("recipient account invalid or closed (ID: %s): %v", req.ToAccountID, err)
 		}
 
 		var txID string
@@ -99,28 +100,40 @@ func (p *PaymentProcessor) processPayment(req PaymentRequest) error {
 	// Anti-Fraud Placeholder: Here we could call an anti-fraud service
 	// if err := CallAntiFraudService(req, ownerID); err != nil { return err }
 
-	// 2. Account Phase: Find the payer's DEPOSIT account
+	// 2. Account Phase: Find the payer's account
 	var fromAccountID string
 	var status string
-	err = tx.QueryRow(ctx, "SELECT id, status FROM financial_accounts WHERE owner_id = $1 AND account_type = 'DEPOSIT' AND status != 'CLOSED' LIMIT 1 FOR UPDATE", ownerID).Scan(&fromAccountID, &status)
-	if err != nil {
-		return fmt.Errorf("payer has no active DEPOSIT account in Ledger DB")
+	var accType string
+
+	if req.FromAccountID != "" {
+		fromAccountID = req.FromAccountID
+		err = tx.QueryRow(ctx, "SELECT account_type, status FROM financial_accounts WHERE id = $1 AND owner_id = $2 FOR UPDATE", fromAccountID, ownerID).Scan(&accType, &status)
+		if err != nil || status == "CLOSED" {
+			return fmt.Errorf("provided sender account invalid or closed")
+		}
+	} else {
+		err = tx.QueryRow(ctx, "SELECT id, account_type, status FROM financial_accounts WHERE owner_id = $1 AND account_type = 'DEPOSIT' AND status != 'CLOSED' LIMIT 1 FOR UPDATE", ownerID).Scan(&fromAccountID, &accType, &status)
+		if err != nil {
+			return fmt.Errorf("payer has no active DEPOSIT account in Ledger DB")
+		}
 	}
 
-	// Check Balance for DEPOSIT account
-	var balance int64
-	balQuery := `
-		SELECT 
-			COALESCE(SUM(CASE WHEN direction = 'CREDIT' THEN amount ELSE 0 END), 0) -
-			COALESCE(SUM(CASE WHEN direction = 'DEBIT' THEN amount ELSE 0 END), 0)
-		FROM entries WHERE account_id = $1
-	`
-	err = tx.QueryRow(ctx, balQuery, fromAccountID).Scan(&balance)
-	if err != nil {
-		return fmt.Errorf("failed to check balance: %v", err)
-	}
-	if balance < req.Amount {
-		return fmt.Errorf("insufficient funds (balance: %d, requested: %d)", balance, req.Amount)
+	// Check Balance for DEPOSIT account (CREDIT accounts can be overdrawn up to a limit, but we'll assume no limit here or handled elsewhere)
+	if accType == "DEPOSIT" {
+		var balance int64
+		balQuery := `
+			SELECT 
+				COALESCE(SUM(CASE WHEN direction = 'CREDIT' THEN amount ELSE 0 END), 0) -
+				COALESCE(SUM(CASE WHEN direction = 'DEBIT' THEN amount ELSE 0 END), 0)
+			FROM entries WHERE account_id = $1
+		`
+		err = tx.QueryRow(ctx, balQuery, fromAccountID).Scan(&balance)
+		if err != nil {
+			return fmt.Errorf("failed to check balance: %v", err)
+		}
+		if balance < req.Amount {
+			return fmt.Errorf("insufficient funds (balance: %d, requested: %d)", balance, req.Amount)
+		}
 	}
 
 	// 3. Execution Phase: Immutable double-entry accounting
@@ -143,7 +156,7 @@ func (p *PaymentProcessor) processPayment(req PaymentRequest) error {
 	var toStatus string
 	err = tx.QueryRow(ctx, "SELECT status FROM financial_accounts WHERE id = $1 FOR UPDATE", req.ToAccountID).Scan(&toStatus)
 	if err != nil || toStatus == "CLOSED" {
-		return fmt.Errorf("recipient account invalid or closed")
+		return fmt.Errorf("recipient account invalid or closed (ID: %s): %v", req.ToAccountID, err)
 	}
 
 	_, err = tx.Exec(ctx, "INSERT INTO entries (transaction_id, account_id, direction, amount) VALUES ($1, $2, 'CREDIT', $3)", txID, req.ToAccountID, req.Amount)
