@@ -4,9 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
-	"time"
 
-	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
