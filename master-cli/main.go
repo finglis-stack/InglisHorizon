@@ -24,6 +24,7 @@ var (
 	// URLs from environment variables with fallback
 	accountAPIURL string
 	bankingAPIURL string
+	paymentAPIURL string
 
 	// Email validation regex
 	emailRegex = regexp.MustCompile(`^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}$`)
@@ -37,6 +38,10 @@ func init() {
 	bankingAPIURL = os.Getenv("LEDGER_SERVICE_URL")
 	if bankingAPIURL == "" {
 		bankingAPIURL = "https://account.ca.inglis.cards"
+	}
+	paymentAPIURL = os.Getenv("PAYMENT_SERVICE_URL")
+	if paymentAPIURL == "" {
+		paymentAPIURL = "https://payment.inglishorizon.com"
 	}
 }
 
@@ -74,6 +79,8 @@ func main() {
 			fmt.Println("  login                           - S'authentifier au réseau sécurisé")
 			fmt.Println("  create-account                  - Démarrer l'assistant de création (Requis: MANAGER)")
 			fmt.Println("  search                          - Rechercher un dossier client par courriel")
+			fmt.Println("  transfer                        - Initier un paiement/transfert asynchrone")
+			fmt.Println("  deposit                         - Ajouter des fonds à un compte financier")
 			fmt.Println("  status                          - Vérifier la connexion serveur")
 			fmt.Println("  clear                           - Nettoyer l'écran")
 			fmt.Println("  logout                          - Se déconnecter")
@@ -103,6 +110,20 @@ func main() {
 				continue
 			}
 			searchAccount()
+
+		case "transfer":
+			if jwtToken == "" {
+				fmt.Println("Erreur: Vous devez être connecté.")
+				continue
+			}
+			createPayment()
+
+		case "deposit":
+			if jwtToken == "" {
+				fmt.Println("Erreur: Vous devez être connecté.")
+				continue
+			}
+			createDeposit()
 
 		case "clear":
 			fmt.Print("\033[H\033[2J")
@@ -875,4 +896,132 @@ func createFinancialAccount(ownerID string) {
 	}
 
 	fmt.Println("SUCCÈS. Le compte a été activé sur le système bancaire.")
+}
+
+func createPayment() {
+	fmt.Println("\n--- Initiation d'un Transfert/Paiement ---")
+	
+	var payerEmail string
+	if err := survey.AskOne(&survey.Input{Message: "Courriel du payeur:"}, &payerEmail); err != nil {
+		return
+	}
+
+	var toAccountID string
+	if err := survey.AskOne(&survey.Input{Message: "ID du compte financier destinataire (UUID):"}, &toAccountID); err != nil {
+		return
+	}
+
+	var amountStr string
+	if err := survey.AskOne(&survey.Input{Message: "Montant (ex: 100.50):"}, &amountStr); err != nil {
+		return
+	}
+
+	amountFloat, err := strconv.ParseFloat(amountStr, 64)
+	if err != nil {
+		fmt.Println("Erreur: Montant invalide.")
+		return
+	}
+	amountCents := int64(amountFloat * 100)
+
+	payload := map[string]interface{}{
+		"payer_email":   payerEmail,
+		"to_account_id": toAccountID,
+		"amount":        amountCents,
+	}
+
+	jsonData, err := json.Marshal(payload)
+	if err != nil {
+		fmt.Println("Erreur interne.")
+		return
+	}
+
+	req, err := authenticatedRequest("POST", paymentAPIURL+"/payments/init", bytes.NewBuffer(jsonData))
+	if err != nil {
+		fmt.Println("Erreur de requête.")
+		return
+	}
+
+	client := &http.Client{Timeout: 10 * time.Second}
+	fmt.Print("\nEnvoi de la transaction au système de paiement asynchrone... ")
+
+	resp, err := client.Do(req)
+	if err != nil {
+		fmt.Println("ÉCHEC: Serveur de paiement injoignable.")
+		return
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusAccepted {
+		fmt.Println("SUCCÈS: Paiement initié et en cours de traitement asynchrone !")
+		var res map[string]interface{}
+		json.NewDecoder(resp.Body).Decode(&res)
+		if key, ok := res["idempotency_key"]; ok {
+			fmt.Printf("Clé d'idempotence: %v\n", key)
+		}
+	} else {
+		fmt.Printf("ÉCHEC (Code %d).\n", resp.StatusCode)
+		bodyBytes, _ := io.ReadAll(resp.Body)
+		fmt.Println("Raison:", string(bodyBytes))
+	}
+}
+
+func createDeposit() {
+	fmt.Println("\n--- Dépôt de fonds (Ajout externe) ---")
+
+	var toAccountID string
+	if err := survey.AskOne(&survey.Input{Message: "ID du compte financier destinataire (UUID):"}, &toAccountID); err != nil {
+		return
+	}
+
+	var amountStr string
+	if err := survey.AskOne(&survey.Input{Message: "Montant à déposer (ex: 500.00):"}, &amountStr); err != nil {
+		return
+	}
+
+	amountFloat, err := strconv.ParseFloat(amountStr, 64)
+	if err != nil {
+		fmt.Println("Erreur: Montant invalide.")
+		return
+	}
+	amountCents := int64(amountFloat * 100)
+
+	payload := map[string]interface{}{
+		"to_account_id": toAccountID,
+		"amount":        amountCents,
+	}
+
+	jsonData, err := json.Marshal(payload)
+	if err != nil {
+		fmt.Println("Erreur interne.")
+		return
+	}
+
+	req, err := authenticatedRequest("POST", paymentAPIURL+"/payments/deposit", bytes.NewBuffer(jsonData))
+	if err != nil {
+		fmt.Println("Erreur de requête.")
+		return
+	}
+
+	client := &http.Client{Timeout: 10 * time.Second}
+	fmt.Print("\nEnvoi de la transaction de dépôt au système asynchrone... ")
+
+	resp, err := client.Do(req)
+	if err != nil {
+		fmt.Println("ÉCHEC: Serveur de paiement injoignable.")
+		return
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusAccepted {
+		fmt.Println("SUCCÈS: Dépôt initié et en cours de traitement asynchrone !")
+		var res map[string]interface{}
+		json.NewDecoder(resp.Body).Decode(&res)
+		if key, ok := res["idempotency_key"]; ok {
+			fmt.Printf("Clé d'idempotence: %v\n", key)
+		}
+	} else {
+		fmt.Printf("ÉCHEC (Code %d).\n", resp.StatusCode)
+		bodyBytes, _ := io.ReadAll(resp.Body)
+		fmt.Println("Raison:", string(bodyBytes))
+	}
 }
