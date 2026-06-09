@@ -16,7 +16,10 @@ import (
 	"github.com/AlecAivazis/survey/v2"
 )
 
-const defaultAccountAPIURL = "https://account-service-production-8482.up.railway.app"
+const (
+	defaultAccountAPIURL = "https://account-service-production-8482.up.railway.app"
+	defaultLedgerAPIURL  = "http://localhost:8483" // To be updated when deployed to Railway
+)
 
 var (
 	jwtToken string
@@ -440,7 +443,9 @@ func sendAccountPayload(payload map[string]interface{}) {
 
 	if resp.StatusCode == http.StatusCreated || resp.StatusCode == http.StatusOK {
 		fmt.Println("SUCCÈS !")
-		fmt.Printf("UUID Sécurisé: %s\n\n", string(bodyBytes))
+		newID := string(bodyBytes)
+		fmt.Printf("UUID Sécurisé: %s\n\n", newID)
+		createLedgerAccount(newID)
 	} else {
 		fmt.Println("ÉCHEC.")
 		var errData map[string]interface{}
@@ -450,4 +455,67 @@ func sendAccountPayload(payload map[string]interface{}) {
 			fmt.Printf("Code HTTP: %d\nDétails bruts: %s\n\n", resp.StatusCode, string(bodyBytes))
 		}
 	}
+}
+
+func createLedgerAccount(ownerID string) {
+	var createLedger bool
+	survey.AskOne(&survey.Confirm{
+		Message: "Voulez-vous ouvrir un compte financier (Ledger) pour cet utilisateur ?",
+		Default: true,
+	}, &createLedger)
+
+	if !createLedger {
+		return
+	}
+
+	var currency, accType string
+	var apr float64
+
+	survey.AskOne(&survey.Select{
+		Message: "Devise du compte (ISO 4217) :",
+		Options: []string{"CAD", "USD", "EUR", "JPY"},
+		Default: "CAD",
+	}, &currency)
+
+	survey.AskOne(&survey.Select{
+		Message: "Type de compte :",
+		Options: []string{"DEPOSIT (Débit/Dépôt)", "CREDIT (Marge/Carte)"},
+	}, &accType)
+
+	if strings.HasPrefix(accType, "CREDIT") {
+		accType = "CREDIT"
+		var aprStr string
+		survey.AskOne(&survey.Input{Message: "Taux d'intérêt annuel (APR) % (ex: 19.99) :"}, &aprStr)
+		fmt.Sscanf(aprStr, "%f", &apr)
+	} else {
+		accType = "DEPOSIT"
+	}
+
+	payload := map[string]interface{}{
+		"owner_id":     ownerID,
+		"currency":     currency,
+		"account_type": accType,
+		"apr":          apr,
+	}
+
+	jsonData, _ := json.Marshal(payload)
+	req, _ := http.NewRequest("POST", defaultLedgerAPIURL+"/ledger/accounts", bytes.NewBuffer(jsonData))
+	req.Header.Set("Content-Type", "application/json")
+
+	client := &http.Client{Timeout: 10 * time.Second}
+	fmt.Print("\nCréation du coffre financier... ")
+	
+	resp, err := client.Do(req)
+	if err != nil {
+		fmt.Println("ÉCHEC: Serveur Ledger injoignable.")
+		return
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusCreated {
+		fmt.Println("ÉCHEC de la création du compte financier.")
+		return
+	}
+
+	fmt.Println("SUCCÈS. Le compte a été activé sur le grand livre.")
 }

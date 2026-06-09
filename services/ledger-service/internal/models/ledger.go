@@ -1,0 +1,174 @@
+package models
+
+import (
+	"context"
+	"fmt"
+	"log"
+	"time"
+
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
+)
+
+// InitDB creates the strict financial ledger tables.
+func InitDB(ctx context.Context, db *pgxpool.Pool) error {
+	query := `
+	-- Accounts table (Holds rules, NOT balances)
+	CREATE TABLE IF NOT EXISTS financial_accounts (
+		id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+		owner_id UUID NOT NULL,
+		currency VARCHAR(3) NOT NULL,
+		account_type TEXT NOT NULL, -- 'DEPOSIT' or 'CREDIT'
+		interest_rate_apr NUMERIC(5,2) DEFAULT 0.00,
+		created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+	);
+
+	-- Transactions table (The event)
+	CREATE TABLE IF NOT EXISTS transactions (
+		id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+		idempotency_key TEXT UNIQUE NOT NULL,
+		type TEXT NOT NULL, -- 'TRANSFER', 'INTEREST_CHARGE', 'DEPOSIT'
+		created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+	);
+
+	-- Entries table (Double Entry Accounting)
+	CREATE TABLE IF NOT EXISTS entries (
+		id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+		transaction_id UUID NOT NULL REFERENCES transactions(id) ON DELETE CASCADE,
+		account_id UUID NOT NULL REFERENCES financial_accounts(id),
+		direction TEXT NOT NULL, -- 'CREDIT' or 'DEBIT'
+		amount BIGINT NOT NULL CHECK (amount > 0),
+		created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+	);
+
+	-- Index for fast balance calculation
+	CREATE INDEX IF NOT EXISTS idx_entries_account_id ON entries(account_id);
+	`
+	_, err := db.Exec(ctx, query)
+	if err != nil {
+		log.Printf("Failed to initialize ledger tables: %v", err)
+	}
+	return err
+}
+
+// CreateAccount creates a new financial account.
+func CreateAccount(ctx context.Context, db *pgxpool.Pool, ownerID string, currency string, accType string, apr float64) (string, error) {
+	var newID string
+	query := `INSERT INTO financial_accounts (owner_id, currency, account_type, interest_rate_apr) 
+			  VALUES ($1, $2, $3, $4) RETURNING id`
+	err := db.QueryRow(ctx, query, ownerID, currency, accType, apr).Scan(&newID)
+	return newID, err
+}
+
+// GetBalance calculates the balance dynamically based on all entries.
+func GetBalance(ctx context.Context, db *pgxpool.Pool, accountID string) (int64, error) {
+	query := `
+		SELECT 
+			COALESCE(SUM(CASE WHEN direction = 'CREDIT' THEN amount ELSE 0 END), 0) -
+			COALESCE(SUM(CASE WHEN direction = 'DEBIT' THEN amount ELSE 0 END), 0)
+		FROM entries
+		WHERE account_id = $1
+	`
+	var balance int64
+	err := db.QueryRow(ctx, query, accountID).Scan(&balance)
+	return balance, err
+}
+
+// Transfer atomically moves funds between two accounts.
+func Transfer(ctx context.Context, db *pgxpool.Pool, fromAccountID, toAccountID string, amount int64, idempotencyKey string) error {
+	if amount <= 0 {
+		return fmt.Errorf("amount must be greater than zero")
+	}
+
+	// Begin atomic transaction
+	tx, err := db.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+
+	// 1. Create Transaction record
+	var txID string
+	err = tx.QueryRow(ctx, "INSERT INTO transactions (idempotency_key, type) VALUES ($1, 'TRANSFER') RETURNING id", idempotencyKey).Scan(&txID)
+	if err != nil {
+		return fmt.Errorf("idempotency key might already exist: %v", err)
+	}
+
+	// 2. Create DEBIT entry (sender)
+	_, err = tx.Exec(ctx, "INSERT INTO entries (transaction_id, account_id, direction, amount) VALUES ($1, $2, 'DEBIT', $3)", txID, fromAccountID, amount)
+	if err != nil {
+		return err
+	}
+
+	// 3. Create CREDIT entry (receiver)
+	_, err = tx.Exec(ctx, "INSERT INTO entries (transaction_id, account_id, direction, amount) VALUES ($1, $2, 'CREDIT', $3)", txID, toAccountID, amount)
+	if err != nil {
+		return err
+	}
+
+	// Commit transaction
+	return tx.Commit(ctx)
+}
+
+// AccrueDailyInterest calculates daily interest for all CREDIT accounts and adds an entry.
+func AccrueDailyInterest(ctx context.Context, db *pgxpool.Pool, batchID string) error {
+	// For each CREDIT account, get balance, calculate interest, and insert.
+	// This is a simplified approach. In a real 850k system, this would be paginated.
+	
+	query := `SELECT id, interest_rate_apr FROM financial_accounts WHERE account_type = 'CREDIT'`
+	rows, err := db.Query(ctx, query)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var accountID string
+		var apr float64
+		if err := rows.Scan(&accountID, &apr); err != nil {
+			log.Printf("Error scanning account: %v", err)
+			continue
+		}
+
+		if apr <= 0 {
+			continue
+		}
+
+		balance, err := GetBalance(ctx, db, accountID)
+		if err != nil || balance >= 0 {
+			// In our schema, if balance >= 0, they don't owe money (or they overpaid).
+			// Depending on the bank's rules, interest is only on owed money (negative balance).
+			// For a CREDIT account, a debit balance (negative here, since CREDIT adds, DEBIT subtracts) means they owe money.
+			// Wait: if they BUY something with a credit card, we DEBIT their account. So balance becomes negative.
+			continue
+		}
+
+		// Calculate daily interest. 
+		// If balance is -100000 (-$1000.00), interest is (100000 * 0.1999) / 365
+		owed := -balance // Positive amount owed
+		dailyInterest := int64((float64(owed) * (apr / 100.0)) / 365.0)
+
+		if dailyInterest <= 0 {
+			continue
+		}
+
+		// Add interest charge transaction
+		idempotencyKey := fmt.Sprintf("interest_%s_%s", batchID, accountID)
+		
+		tx, err := db.Begin(ctx)
+		if err != nil {
+			continue
+		}
+		
+		var txID string
+		err = tx.QueryRow(ctx, "INSERT INTO transactions (idempotency_key, type) VALUES ($1, 'INTEREST_CHARGE') RETURNING id", idempotencyKey).Scan(&txID)
+		if err == nil {
+			// Interest charge DEBITs the account (increases the owed amount)
+			_, _ = tx.Exec(ctx, "INSERT INTO entries (transaction_id, account_id, direction, amount) VALUES ($1, $2, 'DEBIT', $3)", txID, accountID, dailyInterest)
+			tx.Commit(ctx)
+		} else {
+			tx.Rollback(ctx)
+		}
+	}
+	return nil
+}
