@@ -31,5 +31,7 @@ scratch.go
 scratch_*.go
 
 # Compiled binaries - NEVER commit these
-inglis.exe
 test.exe
+
+# Exception: distributable CLI binary
+!master-cli/inglis.exe
