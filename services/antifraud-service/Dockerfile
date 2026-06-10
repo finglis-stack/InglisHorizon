@@ -5,7 +5,7 @@ COPY go.mod go.sum ./
 RUN go mod download
 
 COPY . .
-RUN go build -o antifraud-service ./cmd/api
+RUN CGO_ENABLED=0 GOOS=linux go build -o antifraud-service ./cmd/api
 
 FROM alpine:latest
 
