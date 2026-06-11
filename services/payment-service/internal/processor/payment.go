@@ -95,11 +95,41 @@ func (p *PaymentProcessor) processPayment(req PaymentRequest) error {
 		return tx.Commit(ctx)
 	}
 
-	// 1. Verification Phase: Find the user in Account DB
+	// 1. Verification Phase: Find the user in Account DB (particulier)
 	var ownerID string
 	err = p.AccountDB.QueryRow(ctx, "SELECT id FROM secure_accounts WHERE email = $1", req.PayerEmail).Scan(&ownerID)
 	if err != nil {
-		return fmt.Errorf("payer account not found in Account DB: %v", err)
+		// Payer not found in Account DB. Check if payer is a merchant.
+		merchantURL := os.Getenv("MERCHANT_SERVICE_URL")
+		if merchantURL == "" {
+			merchantURL = "https://merchant-service-production-e5be.up.railway.app"
+		}
+		
+		merchantSearchURL := fmt.Sprintf("%s/merchants/search?q=%s", merchantURL, req.PayerEmail)
+		httpReq, httpErr := http.NewRequestWithContext(ctx, "GET", merchantSearchURL, nil)
+		if httpErr != nil {
+			return fmt.Errorf("payer account not found in Account DB: %v", err)
+		}
+		
+		client := &http.Client{Timeout: 5 * time.Second}
+		resp, httpErr := client.Do(httpReq)
+		if httpErr != nil || resp.StatusCode != http.StatusOK {
+			if resp != nil { resp.Body.Close() }
+			return fmt.Errorf("payer account not found in Account DB nor Merchant DB: %v", err)
+		}
+		
+		var mResult map[string]interface{}
+		jsonErr := json.NewDecoder(resp.Body).Decode(&mResult)
+		resp.Body.Close()
+		if jsonErr != nil {
+			return fmt.Errorf("failed to decode merchant response: %v", jsonErr)
+		}
+		
+		var ok bool
+		ownerID, ok = mResult["id"].(string)
+		if !ok || ownerID == "" {
+			return fmt.Errorf("invalid merchant ID returned from Merchant DB")
+		}
 	}
 
 	// Anti-Fraud Placeholder: Here we could call an anti-fraud service

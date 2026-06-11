@@ -20,12 +20,14 @@ type Account struct {
 	EncryptedSIN      string `json:"-"` // Social Insurance Number (NAS)
 	EncryptedAddress  string `json:"-"`
 	EncryptedDOB      string `json:"-"`
+	EncryptedPhone    string `json:"-"`
 
 	// Cleartext properties for application usage
 	FullName string `json:"full_name"`
 	SIN      string `json:"sin,omitempty"`
 	Address  string `json:"address,omitempty"`
 	DOB      string `json:"dob,omitempty"`
+	Phone    string `json:"phone"`
 }
 
 // CreateTable initializes the secure accounts table in PostgreSQL
@@ -39,8 +41,16 @@ func CreateTable(ctx context.Context, db *pgxpool.Pool) error {
 		encrypted_full_name TEXT NOT NULL,
 		encrypted_sin TEXT,
 		encrypted_address TEXT,
-		encrypted_dob TEXT
+		encrypted_dob TEXT,
+		encrypted_phone TEXT
 	);`
 	_, err := db.Exec(ctx, query)
+	if err != nil {
+		return err
+	}
+
+	// Migrate existing database to add encrypted_phone column if it does not exist
+	alterQuery := `ALTER TABLE secure_accounts ADD COLUMN IF NOT EXISTS encrypted_phone TEXT;`
+	_, err = db.Exec(ctx, alterQuery)
 	return err
 }

@@ -26,6 +26,12 @@ type AccountRequest struct {
 	SIN      string `json:"sin"`
 	Address  string `json:"address"`
 	DOB      string `json:"dob"` // Date of birth
+	Phone    string `json:"phone"`
+}
+
+type UpdatePhoneRequest struct {
+	Email string `json:"email"`
+	Phone string `json:"phone"`
 }
 
 type LoginRequest struct {
@@ -214,8 +220,8 @@ func main() {
 			return
 		}
 
-		if req.Email == "" || req.Name == "" {
-			http.Error(w, `{"message":"Missing required fields"}`, http.StatusBadRequest)
+		if req.Email == "" || req.Name == "" || req.Phone == "" {
+			http.Error(w, `{"message":"Missing required fields (email, name, and phone are mandatory)"}`, http.StatusBadRequest)
 			return
 		}
 
@@ -231,14 +237,15 @@ func main() {
 		encSIN, _ := crypto.Encrypt(req.SIN, key)
 		encAddress, _ := crypto.Encrypt(req.Address, key)
 		encDOB, _ := crypto.Encrypt(req.DOB, key)
+		encPhone, _ := crypto.Encrypt(req.Phone, key)
 
 		query := `
-			INSERT INTO secure_accounts (email, encrypted_full_name, encrypted_sin, encrypted_address, encrypted_dob)
-			VALUES ($1, $2, $3, $4, $5)
+			INSERT INTO secure_accounts (email, encrypted_full_name, encrypted_sin, encrypted_address, encrypted_dob, encrypted_phone)
+			VALUES ($1, $2, $3, $4, $5, $6)
 			RETURNING id;
 		`
 		var newID string
-		err = pool.QueryRow(context.Background(), query, req.Email, encName, encSIN, encAddress, encDOB).Scan(&newID)
+		err = pool.QueryRow(context.Background(), query, req.Email, encName, encSIN, encAddress, encDOB, encPhone).Scan(&newID)
 		if err != nil {
 			log.Printf("DB error: %v", err)
 			http.Error(w, `{"message":"Failed to insert account"}`, http.StatusInternalServerError)
@@ -261,8 +268,8 @@ func main() {
 		log.Printf("AUDIT: Account search performed for email %s", email)
 
 		var acc models.Account
-		query := `SELECT id, email, encrypted_full_name, encrypted_sin, encrypted_address, encrypted_dob FROM secure_accounts WHERE email = $1`
-		err := pool.QueryRow(context.Background(), query, email).Scan(&acc.ID, &acc.Email, &acc.EncryptedFullName, &acc.EncryptedSIN, &acc.EncryptedAddress, &acc.EncryptedDOB)
+		query := `SELECT id, email, encrypted_full_name, encrypted_sin, encrypted_address, encrypted_dob, coalesce(encrypted_phone, '') FROM secure_accounts WHERE email = $1`
+		err := pool.QueryRow(context.Background(), query, email).Scan(&acc.ID, &acc.Email, &acc.EncryptedFullName, &acc.EncryptedSIN, &acc.EncryptedAddress, &acc.EncryptedDOB, &acc.EncryptedPhone)
 		if err != nil {
 			http.Error(w, `{"message":"Account not found"}`, http.StatusNotFound)
 			return
@@ -282,15 +289,68 @@ func main() {
 		}
 		acc.Address, _ = crypto.Decrypt(acc.EncryptedAddress, key)
 		acc.DOB, _ = crypto.Decrypt(acc.EncryptedDOB, key)
+		if acc.EncryptedPhone != "" {
+			acc.Phone, _ = crypto.Decrypt(acc.EncryptedPhone, key)
+		} else {
+			acc.Phone = ""
+		}
 
 		// Don't send encrypted strings back to client
 		acc.EncryptedFullName = ""
 		acc.EncryptedSIN = ""
 		acc.EncryptedAddress = ""
 		acc.EncryptedDOB = ""
+		acc.EncryptedPhone = ""
 
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(acc)
+	}))
+
+	// Endpoint to update existing account phone number (MANAGER or SUPPORT)
+	mux.HandleFunc("POST /admin/accounts/update-phone", rbacMiddleware([]string{"MANAGER", "SUPPORT"}, func(w http.ResponseWriter, r *http.Request) {
+		var req UpdatePhoneRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, `{"message":"Invalid JSON payload"}`, http.StatusBadRequest)
+			return
+		}
+
+		if req.Email == "" || req.Phone == "" {
+			http.Error(w, `{"message":"Missing required fields (email and phone are mandatory)"}`, http.StatusBadRequest)
+			return
+		}
+
+		key, err := crypto.GetMasterKey()
+		if err != nil {
+			log.Printf("Crypto error: %v", err)
+			http.Error(w, `{"message":"Internal Server Error"}`, http.StatusInternalServerError)
+			return
+		}
+
+		encPhone, err := crypto.Encrypt(req.Phone, key)
+		if err != nil {
+			log.Printf("Crypto error: %v", err)
+			http.Error(w, `{"message":"Internal Server Error"}`, http.StatusInternalServerError)
+			return
+		}
+
+		query := `UPDATE secure_accounts SET encrypted_phone = $1, updated_at = NOW() WHERE email = $2`
+		result, err := pool.Exec(context.Background(), query, encPhone, req.Email)
+		if err != nil {
+			log.Printf("DB error: %v", err)
+			http.Error(w, `{"message":"Failed to update phone number"}`, http.StatusInternalServerError)
+			return
+		}
+
+		rowsAffected := result.RowsAffected()
+		if rowsAffected == 0 {
+			http.Error(w, `{"message":"Account not found"}`, http.StatusNotFound)
+			return
+		}
+
+		log.Printf("AUDIT: Phone number updated for account %s", req.Email)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"status":"success","message":"Phone number updated successfully"}`))
 	}))
 
 	port := os.Getenv("PORT")

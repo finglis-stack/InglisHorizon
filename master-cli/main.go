@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/AlecAivazis/survey/v2"
+	"github.com/google/uuid"
 )
 
 var (
@@ -26,6 +27,7 @@ var (
 	bankingAPIURL   string
 	paymentAPIURL   string
 	antifraudAPIURL string
+	merchantAPIURL  string
 
 	// Email validation regex
 	emailRegex = regexp.MustCompile(`^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}$`)
@@ -46,7 +48,11 @@ func init() {
 	}
 	antifraudAPIURL = os.Getenv("ANTIFRAUD_SERVICE_URL")
 	if antifraudAPIURL == "" {
-		antifraudAPIURL = "https://antifraud.inglishorizon.com"
+		antifraudAPIURL = "https://fraud.inglishorizon.com"
+	}
+	merchantAPIURL = os.Getenv("MERCHANT_SERVICE_URL")
+	if merchantAPIURL == "" {
+		merchantAPIURL = "https://merchant.inglistransit.com"
 	}
 }
 
@@ -86,6 +92,10 @@ func main() {
 			fmt.Println("  search                          - Rechercher un dossier client par courriel")
 			fmt.Println("  transfer                        - Initier un paiement/transfert asynchrone")
 			fmt.Println("  deposit                         - Ajouter des fonds à un compte financier")
+			fmt.Println("  create-merchant                 - Enregistrer un marchand sur le réseau")
+			fmt.Println("  search-merchant                 - Trouver un marchand par ID, NEQ, ou courriel")
+			fmt.Println("  list-merchants                  - Lister l'ensemble des marchands du réseau")
+			fmt.Println("  delete-merchant                 - Supprimer un marchand par ID")
 			fmt.Println("  status                          - Vérifier la connexion serveur")
 			fmt.Println("  clear                           - Nettoyer l'écran")
 			fmt.Println("  logout                          - Se déconnecter")
@@ -129,6 +139,34 @@ func main() {
 				continue
 			}
 			createDeposit()
+
+		case "create-merchant":
+			if jwtToken == "" {
+				fmt.Println("Erreur: Vous devez être connecté.")
+				continue
+			}
+			createMerchant()
+
+		case "search-merchant":
+			if jwtToken == "" {
+				fmt.Println("Erreur: Vous devez être connecté.")
+				continue
+			}
+			searchMerchant()
+
+		case "list-merchants":
+			if jwtToken == "" {
+				fmt.Println("Erreur: Vous devez être connecté.")
+				continue
+			}
+			listMerchants()
+
+		case "delete-merchant":
+			if jwtToken == "" {
+				fmt.Println("Erreur: Vous devez être connecté.")
+				continue
+			}
+			deleteMerchant()
 
 		case "clear":
 			fmt.Print("\033[H\033[2J")
@@ -208,32 +246,42 @@ func performInteractiveLogin() {
 
 func checkServerStatus() {
 	client := &http.Client{Timeout: 5 * time.Second}
-	fmt.Print("Pinging Server... ")
 
-	var resp *http.Response
-	var err error
+	fmt.Println("\n--- Diagnostic de l'infrastructure Inglis Horizon ---")
+	
+	services := []struct {
+		Name string
+		URL  string
+	}{
+		{"Secured Accounts Service (PII)", accountAPIURL},
+		{"Central Ledger Service (Banking)", bankingAPIURL},
+		{"Asynchronous Payment Service", paymentAPIURL},
+		{"Anti-Fraud Analysis Service", antifraudAPIURL},
+		{"Merchant Management Service", merchantAPIURL},
+	}
 
-	for i := 0; i < 3; i++ {
-		resp, err = client.Get(accountAPIURL + "/health")
-		if err == nil && resp.StatusCode == http.StatusOK {
-			break
+	fmt.Printf("%-35s | %-55s | %-12s\n", "Service", "URL / Domaine", "Statut")
+	fmt.Println(strings.Repeat("-", 110))
+
+	for _, s := range services {
+		var statusText string
+		resp, err := client.Get(s.URL + "/health")
+		if err != nil {
+			statusText = "HORS LIGNE"
+		} else {
+			if resp.StatusCode == http.StatusOK {
+				statusText = "EN LIGNE"
+			} else if resp.StatusCode == 502 || resp.StatusCode == 503 {
+				statusText = fmt.Sprintf("EN DÉMARRAGE (%d)", resp.StatusCode)
+			} else {
+				statusText = fmt.Sprintf("ERREUR (%d)", resp.StatusCode)
+			}
+			resp.Body.Close()
 		}
-		time.Sleep(1 * time.Second)
+		
+		fmt.Printf("%-35s | %-55s | %-12s\n", s.Name, s.URL, statusText)
 	}
-
-	if err != nil {
-		fmt.Println("ÉCHEC (Serveur injoignable ou hors ligne)")
-		return
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode == http.StatusOK {
-		fmt.Println("EN LIGNE")
-	} else if resp.StatusCode == 502 || resp.StatusCode == 503 {
-		fmt.Printf("EN DÉMARRAGE (Status: %d)\n", resp.StatusCode)
-	} else {
-		fmt.Printf("ERREUR (Status: %d)\n", resp.StatusCode)
-	}
+	fmt.Println()
 }
 
 // ---------------------------------------------------------
@@ -257,6 +305,19 @@ func interactiveCreateAccount() {
 	var name string
 	if err := survey.AskOne(&survey.Input{Message: "Nom complet du client:"}, &name); err != nil {
 		return
+	}
+
+	var phone string
+	for {
+		if err := survey.AskOne(&survey.Input{Message: "Numéro de téléphone (obligatoire):"}, &phone); err != nil {
+			return
+		}
+		phone = strings.TrimSpace(phone)
+		if phone == "" {
+			fmt.Println(" Erreur: Le numéro de téléphone est obligatoire. Veuillez réessayer.")
+			continue
+		}
+		break
 	}
 
 	// 2. Date de naissance & Calcul de l'âge
@@ -350,9 +411,94 @@ func interactiveCreateAccount() {
 		"sin":     sin,
 		"address": finalAddress,
 		"dob":     dob,
+		"phone":   phone,
 	}
 
 	sendAccountPayload(payload)
+}
+
+func ensurePhoneNumber(email string) (map[string]interface{}, error) {
+	email = strings.TrimSpace(email)
+	client := &http.Client{Timeout: 10 * time.Second}
+
+	for {
+		req, err := http.NewRequest("GET", accountAPIURL+"/admin/accounts/search?email="+url.QueryEscape(email), nil)
+		if err != nil {
+			return nil, err
+		}
+		req.Header.Set("Authorization", "Bearer "+jwtToken)
+
+		resp, err := client.Do(req)
+		if err != nil {
+			return nil, err
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode == http.StatusNotFound {
+			return nil, fmt.Errorf("AUCUN RÉSULTAT. Ce courriel n'existe pas dans la base de données.")
+		}
+
+		if resp.StatusCode != http.StatusOK {
+			return nil, fmt.Errorf("ÉCHEC. Erreur du serveur ou accès refusé.")
+		}
+
+		var acc map[string]interface{}
+		if err := json.NewDecoder(resp.Body).Decode(&acc); err != nil {
+			return nil, fmt.Errorf("ÉCHEC: Données corrompues.")
+		}
+
+		phone, _ := acc["phone"].(string)
+		if strings.TrimSpace(phone) != "" {
+			return acc, nil
+		}
+
+		// Phone number is missing! Let's display an error and ask for it.
+		fmt.Printf("\n[ERREUR CLI] Numéro de téléphone manquant pour le compte %s.\n", email)
+		fmt.Println("Le numéro de téléphone est obligatoire. Veuillez le renseigner maintenant.")
+
+		var newPhone string
+		for {
+			if err := survey.AskOne(&survey.Input{Message: "Numéro de téléphone (obligatoire):"}, &newPhone); err != nil {
+				return nil, err
+			}
+			newPhone = strings.TrimSpace(newPhone)
+			if newPhone != "" {
+				break
+			}
+			fmt.Println(" Erreur: Le numéro de téléphone est obligatoire.")
+		}
+
+		// Send update request to server
+		updatePayload := map[string]string{
+			"email": email,
+			"phone": newPhone,
+		}
+		jsonData, err := json.Marshal(updatePayload)
+		if err != nil {
+			return nil, err
+		}
+
+		upReq, err := http.NewRequest("POST", accountAPIURL+"/admin/accounts/update-phone", bytes.NewBuffer(jsonData))
+		if err != nil {
+			return nil, err
+		}
+		upReq.Header.Set("Content-Type", "application/json")
+		upReq.Header.Set("Authorization", "Bearer "+jwtToken)
+
+		upResp, err := client.Do(upReq)
+		if err != nil {
+			return nil, fmt.Errorf("ÉCHEC: Impossible de contacter le serveur pour enregistrer le numéro.")
+		}
+		defer upResp.Body.Close()
+
+		if upResp.StatusCode != http.StatusOK {
+			bodyBytes, _ := io.ReadAll(upResp.Body)
+			return nil, fmt.Errorf("ÉCHEC de la mise à jour sur le serveur: %s", string(bodyBytes))
+		}
+
+		fmt.Println("Numéro de téléphone enregistré avec succès dans la base de données de haute sécurité !")
+		// Loop back to fetch the updated profile and verify everything
+	}
 }
 
 func searchAccount() {
@@ -365,39 +511,12 @@ func searchAccount() {
 		return
 	}
 
-	req, err := http.NewRequest("GET", accountAPIURL+"/admin/accounts/search?email="+url.QueryEscape(email), nil)
-	if err != nil {
-		fmt.Println("Erreur de requête.")
-		return
-	}
-	req.Header.Set("Authorization", "Bearer "+jwtToken)
-
-	client := &http.Client{Timeout: 10 * time.Second}
 	fmt.Print("Recherche sécurisée en cours... ")
-
-	resp, err := client.Do(req)
+	acc, err := ensurePhoneNumber(email)
 	if err != nil {
-		fmt.Println("ÉCHEC: Serveur injoignable.")
+		fmt.Printf("\nErreur : %v\n", err)
 		return
 	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode == http.StatusNotFound {
-		fmt.Println("AUCUN RÉSULTAT. Ce courriel n'existe pas dans la base de données.")
-		return
-	}
-
-	if resp.StatusCode != http.StatusOK {
-		fmt.Println("ÉCHEC. Erreur du serveur ou accès refusé.")
-		return
-	}
-
-	var acc map[string]interface{}
-	if err := json.NewDecoder(resp.Body).Decode(&acc); err != nil {
-		fmt.Println("ÉCHEC: Données corrompues.")
-		return
-	}
-
 	fmt.Println("SUCCÈS.\n")
 
 	dobStr, _ := acc["dob"].(string)
@@ -1106,23 +1225,31 @@ func selectAccountInteractive(email string, promptMsg string) string {
 	// 1. Find ownerID
 	email = strings.TrimSpace(email)
 	client := &http.Client{Timeout: 10 * time.Second}
-	req, err := authenticatedRequest("GET", accountAPIURL+"/admin/accounts/search?email="+url.QueryEscape(email), nil)
-	if err != nil {
-		fmt.Println("Erreur: Impossible de créer la requête.")
-		return ""
+	
+	var ownerID string
+	
+	// Try to find the merchant first
+	merchResp, err := client.Get(merchantAPIURL + "/merchants/search?q=" + url.QueryEscape(email))
+	if err == nil && merchResp.StatusCode == http.StatusOK {
+		var mData map[string]interface{}
+		if json.NewDecoder(merchResp.Body).Decode(&mData) == nil {
+			ownerID, _ = mData["id"].(string)
+		}
+		merchResp.Body.Close()
 	}
-	resp, err := client.Do(req)
-	if err != nil || resp.StatusCode != http.StatusOK {
-		fmt.Println("Erreur: Utilisateur non trouvé.")
-		if resp != nil { resp.Body.Close() }
-		return ""
+	
+	if ownerID == "" {
+		// Fallback to regular user
+		uData, err := ensurePhoneNumber(email)
+		if err != nil {
+			fmt.Printf("Erreur: %v\n", err)
+			return ""
+		}
+		ownerID, _ = uData["id"].(string)
 	}
-	var uData map[string]interface{}
-	json.NewDecoder(resp.Body).Decode(&uData)
-	resp.Body.Close()
-	ownerID, ok := uData["id"].(string)
-	if !ok || ownerID == "" {
-		fmt.Println("Erreur: ID utilisateur invalide.")
+
+	if ownerID == "" {
+		fmt.Println("Erreur: ID propriétaire de compte invalide.")
 		return ""
 	}
 
@@ -1185,5 +1312,224 @@ func selectAccountInteractive(email string, promptMsg string) string {
 	}
 
 	return accountIDs[choice]
+}
+
+func createMerchant() {
+	fmt.Println("\n--- Enregistrement d'un Marchand ---")
+
+	// Generate UUID ourselves
+	id := uuid.NewString()
+
+	var name string
+	if err := survey.AskOne(&survey.Input{Message: "Nom du commerce / Marchand:"}, &name); err != nil {
+		return
+	}
+	name = strings.TrimSpace(name)
+
+	var email string
+	if err := survey.AskOne(&survey.Input{Message: "Courriel de contact:"}, &email); err != nil {
+		return
+	}
+	email = strings.TrimSpace(email)
+	if !emailRegex.MatchString(email) {
+		fmt.Println("Erreur: Courriel invalide.")
+		return
+	}
+
+	// Address search via OpenStreetMap
+	var addressQuery string
+	if err := survey.AskOne(&survey.Input{Message: "Recherche d'adresse (ex: 1000 de la gauchetiere, montreal):"}, &addressQuery); err != nil {
+		return
+	}
+
+	addressOptions := searchOpenStreetMap(addressQuery)
+	var finalAddress string
+
+	if len(addressOptions) > 0 {
+		if err := survey.AskOne(&survey.Select{
+			Message: "Sélectionnez l'adresse validée :",
+			Options: addressOptions,
+		}, &finalAddress); err != nil {
+			return
+		}
+	} else {
+		fmt.Println(" Aucune recommandation trouvée. Saisie manuelle requise.")
+		if err := survey.AskOne(&survey.Input{Message: "Adresse complète:"}, &finalAddress); err != nil {
+			return
+		}
+	}
+
+	var neq string
+	if err := survey.AskOne(&survey.Input{Message: "Numéro d'entreprise du Québec (NEQ):"}, &neq); err != nil {
+		return
+	}
+	neq = strings.TrimSpace(neq)
+
+	payload := map[string]string{
+		"id":      id,
+		"name":    name,
+		"email":   email,
+		"address": finalAddress,
+		"neq":     neq,
+	}
+
+	jsonData, err := json.Marshal(payload)
+	if err != nil {
+		fmt.Println("Erreur: Impossible de préparer les données.")
+		return
+	}
+
+	req, err := http.NewRequest("POST", merchantAPIURL+"/merchants", bytes.NewBuffer(jsonData))
+	if err != nil {
+		fmt.Println("Erreur: Impossible de créer la requête.")
+		return
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	client := &http.Client{Timeout: 10 * time.Second}
+	fmt.Print("Envoi au serveur de base de données marchande... ")
+	resp, err := client.Do(req)
+	if err != nil {
+		fmt.Println("ÉCHEC: Serveur marchand injoignable.")
+		return
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusCreated {
+		fmt.Println("SUCCÈS ! Marchand enregistré.")
+		fmt.Printf("ID Ledger (UUID généré automatiquement) : %s\n", id)
+	} else {
+		body, _ := io.ReadAll(resp.Body)
+		fmt.Printf("ÉCHEC (Code %d): %s\n", resp.StatusCode, string(body))
+	}
+}
+
+func searchMerchant() {
+	var searchVal string
+	if err := survey.AskOne(&survey.Input{Message: "Recherche par NEQ, courriel, ou ID du marchand:"}, &searchVal); err != nil {
+		return
+	}
+	searchVal = strings.TrimSpace(searchVal)
+	if searchVal == "" {
+		return
+	}
+
+	client := &http.Client{Timeout: 10 * time.Second}
+	var resp *http.Response
+	var err error
+
+	// If it's a UUID, we can fetch by ID directly, otherwise search by query q
+	isUUID := regexp.MustCompile(`^[a-fA-F0-9-]{36}$`).MatchString(searchVal)
+	if isUUID {
+		resp, err = client.Get(merchantAPIURL + "/merchants/" + url.PathEscape(searchVal))
+	} else {
+		resp, err = client.Get(merchantAPIURL + "/merchants/search?q=" + url.QueryEscape(searchVal))
+	}
+
+	if err != nil {
+		fmt.Println("Erreur: Serveur injoignable.")
+		return
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusNotFound {
+		fmt.Println("Aucun marchand trouvé.")
+		return
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		fmt.Printf("Erreur serveur (Code %d).\n", resp.StatusCode)
+		return
+	}
+
+	var m map[string]interface{}
+	if err := json.NewDecoder(resp.Body).Decode(&m); err != nil {
+		fmt.Println("Données corrompues.")
+		return
+	}
+
+	fmt.Println("\n=========================================")
+	fmt.Println("            DOSSIER MARCHAND             ")
+	fmt.Println("=========================================")
+	fmt.Printf("ID Ledger (UUID) : %v\n", m["id"])
+	fmt.Printf("Nom Commerce     : %v\n", m["name"])
+	fmt.Printf("Courriel         : %v\n", m["email"])
+	fmt.Printf("NEQ              : %v\n", m["neq"])
+	fmt.Printf("Adresse          : %v\n", m["address"])
+	fmt.Printf("Date Création    : %v\n", m["created_at"])
+	fmt.Println("=========================================")
+}
+
+func listMerchants() {
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Get(merchantAPIURL + "/merchants")
+	if err != nil {
+		fmt.Println("Erreur: Serveur injoignable.")
+		return
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		fmt.Printf("Erreur serveur (Code %d).\n", resp.StatusCode)
+		return
+	}
+
+	var list []map[string]interface{}
+	if err := json.NewDecoder(resp.Body).Decode(&list); err != nil {
+		fmt.Println("Données corrompues.")
+		return
+	}
+
+	if len(list) == 0 {
+		fmt.Println("Aucun marchand enregistré.")
+		return
+	}
+
+	fmt.Println("\n=========================================================================================")
+	fmt.Println("                                   LISTE DES MARCHANDS                                   ")
+	fmt.Println("=========================================================================================")
+	for i, m := range list {
+		fmt.Printf("[%d] Nom: %-25v | NEQ: %-12v | Courriel: %-25v | ID Ledger: %v\n", i+1, m["name"], m["neq"], m["email"], m["id"])
+	}
+	fmt.Println("=========================================================================================")
+}
+
+func deleteMerchant() {
+	var id string
+	if err := survey.AskOne(&survey.Input{Message: "ID Ledger du marchand à supprimer (UUID):"}, &id); err != nil {
+		return
+	}
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return
+	}
+
+	var confirm bool
+	if err := survey.AskOne(&survey.Confirm{Message: fmt.Sprintf("Voulez-vous vraiment supprimer le marchand %s ?", id)}, &confirm); err != nil {
+		return
+	}
+	if !confirm {
+		return
+	}
+
+	req, err := http.NewRequest("DELETE", merchantAPIURL+"/merchants/"+url.PathEscape(id), nil)
+	if err != nil {
+		fmt.Println("Erreur de requête.")
+		return
+	}
+
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		fmt.Println("Erreur: Serveur injoignable.")
+		return
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusNoContent || resp.StatusCode == http.StatusOK {
+		fmt.Println("Marchand supprimé avec succès.")
+	} else {
+		fmt.Printf("ÉCHEC de la suppression (Code %d).\n", resp.StatusCode)
+	}
 }
 
