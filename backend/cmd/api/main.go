@@ -11,6 +11,7 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 	"inglishorizon-backend/internal/crypto"
 	"inglishorizon-backend/internal/db"
+	"inglishorizon-backend/internal/ledger"
 	"inglishorizon-backend/internal/models"
 )
 
@@ -101,6 +102,12 @@ func main() {
 				http.Error(w, `{"message":"Failed to create merchant"}`, http.StatusInternalServerError)
 				return
 			}
+
+			// Automatically create ledger accounts for the merchant (CAD, USD, EUR, JPY)
+			if err := ledger.CreateMerchantAccounts(r.Context(), m.ID); err != nil {
+				log.Printf("Warning: Failed to automatically create ledger accounts for merchant %s: %v", m.ID, err)
+			}
+
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusCreated)
 			json.NewEncoder(w).Encode(m)
