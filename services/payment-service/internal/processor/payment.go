@@ -8,6 +8,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -139,15 +140,16 @@ func (p *PaymentProcessor) processPayment(req PaymentRequest) error {
 	var fromAccountID string
 	var status string
 	var accType string
+	var fromCurrency string
 
 	if req.FromAccountID != "" {
 		fromAccountID = req.FromAccountID
-		err = tx.QueryRow(ctx, "SELECT account_type, status FROM financial_accounts WHERE id = $1 AND owner_id = $2 FOR UPDATE", fromAccountID, ownerID).Scan(&accType, &status)
+		err = tx.QueryRow(ctx, "SELECT account_type, status, currency FROM financial_accounts WHERE id = $1 AND owner_id = $2 FOR UPDATE", fromAccountID, ownerID).Scan(&accType, &status, &fromCurrency)
 		if err != nil || status == "CLOSED" {
 			return fmt.Errorf("provided sender account invalid or closed")
 		}
 	} else {
-		err = tx.QueryRow(ctx, "SELECT id, account_type, status FROM financial_accounts WHERE owner_id = $1 AND account_type = 'DEPOSIT' AND status != 'CLOSED' LIMIT 1 FOR UPDATE", ownerID).Scan(&fromAccountID, &accType, &status)
+		err = tx.QueryRow(ctx, "SELECT id, account_type, status, currency FROM financial_accounts WHERE owner_id = $1 AND account_type = 'DEPOSIT' AND status != 'CLOSED' LIMIT 1 FOR UPDATE", ownerID).Scan(&fromAccountID, &accType, &status, &fromCurrency)
 		if err != nil {
 			return fmt.Errorf("payer has no active DEPOSIT account in Ledger DB")
 		}
@@ -216,15 +218,56 @@ func (p *PaymentProcessor) processPayment(req PaymentRequest) error {
 	// Create CREDIT entry (receiver)
 	// First, check if receiver exists
 	var toStatus string
-	err = tx.QueryRow(ctx, "SELECT status FROM financial_accounts WHERE id = $1 FOR UPDATE", req.ToAccountID).Scan(&toStatus)
+	var toCurrency string
+	err = tx.QueryRow(ctx, "SELECT status, currency FROM financial_accounts WHERE id = $1 FOR UPDATE", req.ToAccountID).Scan(&toStatus, &toCurrency)
 	if err != nil || toStatus == "CLOSED" {
 		return fmt.Errorf("recipient account invalid or closed (ID: %s): %v", req.ToAccountID, err)
 	}
 
-	_, err = tx.Exec(ctx, "INSERT INTO entries (transaction_id, account_id, direction, amount) VALUES ($1, $2, 'CREDIT', $3)", txID, req.ToAccountID, req.Amount)
+	creditAmount := req.Amount
+	if fromCurrency != toCurrency {
+		converted, convErr := convertCurrency(req.Amount, fromCurrency, toCurrency)
+		if convErr != nil {
+			return fmt.Errorf("currency conversion error: %v", convErr)
+		}
+		creditAmount = converted
+		log.Printf("[CURRENCY CONVERSION] Converted %d %s to %d %s for transaction %s", req.Amount, fromCurrency, creditAmount, toCurrency, req.IdempotencyKey)
+	}
+
+	_, err = tx.Exec(ctx, "INSERT INTO entries (transaction_id, account_id, direction, amount) VALUES ($1, $2, 'CREDIT', $3)", txID, req.ToAccountID, creditAmount)
 	if err != nil {
 		return fmt.Errorf("failed to create credit entry: %v", err)
 	}
 
 	return tx.Commit(ctx)
 }
+
+func convertCurrency(amount int64, fromCur, toCur string) (int64, error) {
+	fromCur = strings.ToUpper(fromCur)
+	toCur = strings.ToUpper(toCur)
+	if fromCur == toCur {
+		return amount, nil
+	}
+
+	rates := map[string]float64{
+		"CAD": 1.0,
+		"USD": 1.37,    // 1 USD = 1.37 CAD
+		"EUR": 1.47,    // 1 EUR = 1.47 CAD
+		"JPY": 0.0087,  // 1 JPY = 0.0087 CAD
+	}
+
+	fromRate, ok1 := rates[fromCur]
+	toRate, ok2 := rates[toCur]
+	if !ok1 || !ok2 {
+		return 0, fmt.Errorf("unsupported currency conversion from %s to %s", fromCur, toCur)
+	}
+
+	// Convert to CAD (base)
+	amountInBase := float64(amount) * fromRate
+	// Convert from CAD to target currency
+	convertedAmount := amountInBase / toRate
+
+	// Round to nearest integer (cent/unit)
+	return int64(convertedAmount + 0.5), nil
+}
+
