@@ -175,6 +175,7 @@ func main() {
 			"balance":      balance,
 			"account_id":   acc.ID,
 			"owner_id":     acc.OwnerID,
+			"name":         acc.Name,
 		})
 	}))
 

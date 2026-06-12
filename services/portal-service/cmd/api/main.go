@@ -351,6 +351,7 @@ func listLinkedAccountsHandler(w http.ResponseWriter, r *http.Request) {
 		Status      string  `json:"status"`
 		APR         float64 `json:"apr"`
 		CreditLimit int64   `json:"credit_limit"`
+		Name        string  `json:"name"`
 	}
 
 	type AccountWithBalance struct {
@@ -596,6 +597,7 @@ func getAccountDetailsHandler(w http.ResponseWriter, r *http.Request) {
 		APR         float64 `json:"apr"`
 		CreditLimit int64   `json:"credit_limit"`
 		OwnerID     string  `json:"owner_id"`
+		Name        string  `json:"name"`
 	}
 
 	type AccountWithBalance struct {
@@ -667,6 +669,7 @@ func transferFundsHandler(w http.ResponseWriter, r *http.Request) {
 		APR         float64 `json:"apr"`
 		CreditLimit int64   `json:"credit_limit"`
 		OwnerID     string  `json:"owner_id"`
+		Name        string  `json:"name"`
 	}
 	var details LedgerAccount
 	err = fetchLedgerData(r.Context(), "/ledger/accounts/"+req.FromAccountID, &details)

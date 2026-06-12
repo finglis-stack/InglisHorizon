@@ -127,8 +127,16 @@
 
         .account-id {
             font-family: monospace;
-            font-weight: 600;
-            font-size: 14px;
+            font-weight: 400;
+            font-size: 11px;
+            color: var(--text-muted);
+        }
+
+        .account-name {
+            font-weight: 700;
+            font-size: 16px;
+            letter-spacing: -0.3px;
+            color: var(--text-main);
         }
 
         .account-meta {
@@ -474,6 +482,7 @@
 
                     item.innerHTML = `
                         <div class="account-info">
+                            <div class="account-name">${acc.name || (isCredit ? 'Carte de crédit' : 'Compte de dépôt')}</div>
                             <span class="account-id">${acc.id}</span>
                             <div class="account-meta">
                                 <span class="badge ${isCredit ? 'credit' : 'deposit'}">${acc.account_type}</span>

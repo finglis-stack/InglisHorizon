@@ -17,6 +17,7 @@ type Account struct {
 	Status      string  `json:"status"`
 	APR         float64 `json:"apr"`
 	CreditLimit int64   `json:"credit_limit"`
+	Name        string  `json:"name"`
 }
 
 type Transaction struct {
@@ -37,6 +38,7 @@ func InitDB(ctx context.Context, db *pgxpool.Pool) error {
 		currency VARCHAR(3) NOT NULL,
 		account_type TEXT NOT NULL, -- 'DEPOSIT' or 'CREDIT'
 		interest_rate_apr NUMERIC(5,2) DEFAULT 0.00,
+		name TEXT DEFAULT '',
 		created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 	);
 
@@ -81,23 +83,38 @@ func InitDB(ctx context.Context, db *pgxpool.Pool) error {
 		log.Printf("Failed to add credit_limit column: %v", err)
 	}
 
+	// Migrate existing tables to add name if not exists
+	alterQueryName := `ALTER TABLE financial_accounts ADD COLUMN IF NOT EXISTS name TEXT DEFAULT '';`
+	_, err = db.Exec(ctx, alterQueryName)
+	if err != nil {
+		log.Printf("Failed to add name column: %v", err)
+	}
+
+	// Backfill names
+	_, _ = db.Exec(ctx, "UPDATE financial_accounts SET name = 'Compte de dépôt' WHERE account_type = 'DEPOSIT' AND (name IS NULL OR name = '')")
+	_, _ = db.Exec(ctx, "UPDATE financial_accounts SET name = 'Carte de crédit' WHERE account_type = 'CREDIT' AND (name IS NULL OR name = '')")
+
 	return err
 }
 
 // CreateAccount creates a new financial account.
 func CreateAccount(ctx context.Context, db *pgxpool.Pool, ownerID string, currency string, accType string, apr float64, creditLimit int64) (string, error) {
 	var newID string
-	query := `INSERT INTO financial_accounts (owner_id, currency, account_type, interest_rate_apr, credit_limit) 
-			  VALUES ($1, $2, $3, $4, $5) RETURNING id`
-	err := db.QueryRow(ctx, query, ownerID, currency, accType, apr, creditLimit).Scan(&newID)
+	name := "Compte de dépôt"
+	if accType == "CREDIT" {
+		name = "Carte de crédit"
+	}
+	query := `INSERT INTO financial_accounts (owner_id, currency, account_type, interest_rate_apr, credit_limit, name) 
+			  VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`
+	err := db.QueryRow(ctx, query, ownerID, currency, accType, apr, creditLimit, name).Scan(&newID)
 	return newID, err
 }
 
 // GetAccount retrieves metadata for a single financial account.
 func GetAccount(ctx context.Context, db *pgxpool.Pool, accountID string) (*Account, error) {
 	var a Account
-	query := `SELECT id, owner_id, currency, account_type, status, interest_rate_apr, credit_limit FROM financial_accounts WHERE id = $1`
-	err := db.QueryRow(ctx, query, accountID).Scan(&a.ID, &a.OwnerID, &a.Currency, &a.Type, &a.Status, &a.APR, &a.CreditLimit)
+	query := `SELECT id, owner_id, currency, account_type, status, interest_rate_apr, credit_limit, COALESCE(name, '') FROM financial_accounts WHERE id = $1`
+	err := db.QueryRow(ctx, query, accountID).Scan(&a.ID, &a.OwnerID, &a.Currency, &a.Type, &a.Status, &a.APR, &a.CreditLimit, &a.Name)
 	if err != nil {
 		return nil, err
 	}
@@ -106,7 +123,7 @@ func GetAccount(ctx context.Context, db *pgxpool.Pool, accountID string) (*Accou
 
 // GetAccountsByOwner retrieves all financial accounts for a given client.
 func GetAccountsByOwner(ctx context.Context, db *pgxpool.Pool, ownerID string) ([]Account, error) {
-	query := `SELECT id, owner_id, currency, account_type, status, interest_rate_apr, credit_limit FROM financial_accounts WHERE owner_id = $1 ORDER BY created_at DESC`
+	query := `SELECT id, owner_id, currency, account_type, status, interest_rate_apr, credit_limit, COALESCE(name, '') FROM financial_accounts WHERE owner_id = $1 ORDER BY created_at DESC`
 	rows, err := db.Query(ctx, query, ownerID)
 	if err != nil {
 		return nil, err
@@ -116,7 +133,7 @@ func GetAccountsByOwner(ctx context.Context, db *pgxpool.Pool, ownerID string) (
 	var accounts []Account
 	for rows.Next() {
 		var a Account
-		if err := rows.Scan(&a.ID, &a.OwnerID, &a.Currency, &a.Type, &a.Status, &a.APR, &a.CreditLimit); err != nil {
+		if err := rows.Scan(&a.ID, &a.OwnerID, &a.Currency, &a.Type, &a.Status, &a.APR, &a.CreditLimit, &a.Name); err != nil {
 			return nil, err
 		}
 		accounts = append(accounts, a)
