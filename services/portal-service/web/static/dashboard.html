@@ -480,7 +480,7 @@
                                 <span class="badge">${acc.status}</span>
                                 <span class="badge">APR: ${acc.apr}%</span>
                             </div>
-                            <button class="btn-view-tx" onclick="window.location.href='/account?id=' + acc.id">Détails & Transfert</button>
+                            <button class="btn-view-tx" onclick="window.location.href='/account?id=${acc.id}'">Détails & Transfert</button>
                         </div>
                         <div class="account-balance">
                             <span class="balance-amount">${formatMoney(acc.balance, acc.currency)}</span>
