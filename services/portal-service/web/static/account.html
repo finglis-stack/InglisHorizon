@@ -419,7 +419,7 @@
         <div id="section-transfer" class="tab-content">
             <div style="max-width: 500px; margin: 0 auto; padding: 20px 0;">
                 <p style="margin-bottom: 24px; font-size: 13px; color: var(--text-muted); line-height: 1.5;">
-                    Effectuez un transfert instantané vers un autre compte Inglis Horizon. Les transactions transitent par le système de compensation de la banque.
+                    Effectuez un transfert instantané vers un autre compte Inglis Horizon. Les transactions transitent par le système de compensation du réseau.
                 </p>
 
                 <div id="transfer-error" class="error-banner"></div>
@@ -604,7 +604,7 @@
             const data = await res.json();
 
             if (!res.ok) {
-                throw new Error(data.message || "Le transfert a été rejeté par la banque.");
+                throw new Error(data.message || "Le transfert a été rejeté par le réseau.");
             }
 
             transferSuccess.textContent = "Le transfert a été initié et est en cours de traitement.";
