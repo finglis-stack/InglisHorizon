@@ -1,0 +1,585 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Espace Client - Inglis Horizon</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-color: #f9fafb;
+            --text-main: #111827;
+            --text-muted: #4b5563;
+            --border-color: #e5e7eb;
+            --primary: #111827;
+            --primary-hover: #374151;
+            --success: #059669;
+            --error: #dc2626;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text-main);
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+
+        header {
+            background-color: #ffffff;
+            border-bottom: 1px solid var(--border-color);
+            padding: 20px 40px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .logo {
+            font-size: 18px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: -0.5px;
+        }
+
+        .user-menu {
+            display: flex;
+            align-items: center;
+            gap: 20px;
+            font-size: 14px;
+        }
+
+        .logout-btn {
+            background: none;
+            border: 1px solid var(--border-color);
+            padding: 8px 16px;
+            cursor: pointer;
+            font-weight: 600;
+            font-size: 12px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            transition: all 0.2s ease;
+        }
+
+        .logout-btn:hover {
+            background-color: #f3f4f6;
+            border-color: var(--text-main);
+        }
+
+        .container {
+            max-width: 1200px;
+            width: 100%;
+            margin: 40px auto;
+            padding: 0 40px;
+            flex: 1;
+            display: grid;
+            grid-template-columns: 2fr 1fr;
+            gap: 40px;
+        }
+
+        @media (max-width: 960px) {
+            .container {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        h2 {
+            font-size: 22px;
+            font-weight: 700;
+            margin-bottom: 24px;
+            letter-spacing: -0.5px;
+        }
+
+        .card {
+            background-color: #ffffff;
+            border: 1px solid var(--border-color);
+            padding: 30px;
+            margin-bottom: 30px;
+        }
+
+        .account-item {
+            border: 1px solid var(--border-color);
+            padding: 24px;
+            margin-bottom: 16px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            transition: border-color 0.2s ease;
+        }
+
+        .account-item:hover {
+            border-color: var(--text-main);
+        }
+
+        .account-info {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+
+        .account-id {
+            font-family: monospace;
+            font-weight: 600;
+            font-size: 14px;
+        }
+
+        .account-meta {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+        }
+
+        .badge {
+            font-size: 10px;
+            font-weight: 700;
+            text-transform: uppercase;
+            padding: 2px 8px;
+            background-color: #f3f4f6;
+            color: var(--text-muted);
+        }
+
+        .badge.credit {
+            background-color: #fef3c7;
+            color: #d97706;
+        }
+
+        .badge.deposit {
+            background-color: #d1fae5;
+            color: #059669;
+        }
+
+        .account-balance {
+            text-align: right;
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+
+        .balance-amount {
+            font-size: 20px;
+            font-weight: 700;
+            letter-spacing: -0.5px;
+        }
+
+        .limit-amount {
+            font-size: 11px;
+            color: var(--text-muted);
+        }
+
+        .btn-view-tx {
+            background: none;
+            border: 1px solid var(--text-main);
+            color: var(--text-main);
+            padding: 6px 12px;
+            font-size: 11px;
+            font-weight: 600;
+            text-transform: uppercase;
+            cursor: pointer;
+            margin-top: 10px;
+            align-self: flex-start;
+            transition: all 0.2s ease;
+        }
+
+        .btn-view-tx:hover {
+            background-color: var(--primary);
+            color: #ffffff;
+        }
+
+        .empty-state {
+            text-align: center;
+            padding: 40px 0;
+            color: var(--text-muted);
+            font-size: 14px;
+        }
+
+        /* Form styling */
+        .form-group {
+            margin-bottom: 20px;
+        }
+
+        label {
+            display: block;
+            font-size: 11px;
+            text-transform: uppercase;
+            letter-spacing: 1.5px;
+            color: var(--text-muted);
+            margin-bottom: 8px;
+            font-weight: 600;
+        }
+
+        input {
+            width: 100%;
+            padding: 14px 16px;
+            font-size: 14px;
+            border: 1px solid var(--border-color);
+            background-color: #f9fafb;
+            color: var(--text-main);
+            border-radius: 0;
+            outline: none;
+            font-family: inherit;
+        }
+
+        input:focus {
+            border-color: var(--primary);
+            background-color: #ffffff;
+        }
+
+        .btn-link {
+            width: 100%;
+            background-color: var(--primary);
+            color: #ffffff;
+            border: none;
+            padding: 16px 24px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: background-color 0.2s ease;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .btn-link:hover {
+            background-color: var(--primary-hover);
+        }
+
+        .error-banner {
+            background-color: #fee2e2;
+            border: 1px solid #fecaca;
+            color: #991b1b;
+            padding: 16px;
+            font-size: 13px;
+            margin-bottom: 24px;
+            line-height: 1.4;
+            display: none;
+        }
+
+        .success-banner {
+            background-color: #ecfdf5;
+            border: 1px solid #a7f3d0;
+            color: var(--success);
+            padding: 16px;
+            font-size: 13px;
+            margin-bottom: 24px;
+            line-height: 1.4;
+            display: none;
+        }
+
+        /* Transaction Log */
+        .tx-container {
+            margin-top: 20px;
+        }
+
+        .tx-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 13px;
+            text-align: left;
+        }
+
+        .tx-table th {
+            border-bottom: 2px solid var(--border-color);
+            padding: 12px;
+            font-weight: 600;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            font-size: 10px;
+            letter-spacing: 1px;
+        }
+
+        .tx-table td {
+            border-bottom: 1px solid var(--border-color);
+            padding: 14px 12px;
+        }
+
+        .tx-table tr:hover {
+            background-color: #f9fafb;
+        }
+
+        .amount-credit {
+            color: var(--success);
+            font-weight: 600;
+        }
+
+        .amount-debit {
+            color: var(--text-main);
+        }
+
+        .tx-type {
+            font-weight: 500;
+        }
+
+        .spinner {
+            width: 20px;
+            height: 20px;
+            border: 2px solid rgba(255, 255, 255, 0.3);
+            border-radius: 50%;
+            border-top-color: #ffffff;
+            animation: spin 0.8s linear infinite;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body>
+
+<header>
+    <div class="logo">Inglis Horizon</div>
+    <div class="user-menu">
+        <span id="user-display">Chargement...</span>
+        <button id="logout-btn" class="logout-btn">Se déconnecter</button>
+    </div>
+</header>
+
+<div class="container">
+    <!-- Left Column: Linked Accounts -->
+    <div>
+        <div id="status-banner-error" class="error-banner"></div>
+        <div id="status-banner-success" class="success-banner"></div>
+
+        <div class="card">
+            <h2>Mes comptes reliés</h2>
+            <div id="accounts-list">
+                <div class="empty-state">Chargement de vos comptes...</div>
+            </div>
+        </div>
+
+        <div id="transactions-card" class="card" style="display: none;">
+            <h2 id="transactions-title">Transactions Récentes</h2>
+            <div class="tx-container">
+                <table class="tx-table">
+                    <thead>
+                        <tr>
+                            <th>Date</th>
+                            <th>Description</th>
+                            <th>Type</th>
+                            <th>Montant</th>
+                        </tr>
+                    </thead>
+                    <tbody id="transactions-list">
+                        <!-- Transactions will load here -->
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- Right Column: Add/Link Account -->
+    <div>
+        <div class="card">
+            <h2>Relier un compte</h2>
+            <p class="subtitle" style="margin-bottom: 20px; font-size: 13px;">Reliez votre compte bancaire Inglis Horizon. Pour des raisons de sécurité, vous devrez valider la liaison avec la clé d'accès biométrique associée à ce compte.</p>
+            
+            <div id="link-error-box" class="error-banner"></div>
+
+            <form id="link-form">
+                <div class="form-group">
+                    <label for="account-id-input">ID du Compte Bancaire (UUID)</label>
+                    <input type="text" id="account-id-input" placeholder="ex: 12345678-abcd-ef01-2345-6789abcdef01" required>
+                </div>
+                <button type="submit" id="link-submit-btn" class="btn-link">
+                    Lancer la liaison
+                </button>
+            </form>
+        </div>
+    </div>
+</div>
+
+<script>
+    // URL Banner Status Handling
+    const urlParams = new URLSearchParams(window.location.search);
+    const status = urlParams.get('status');
+    const error = urlParams.get('error');
+
+    if (status === 'success') {
+        const succ = document.getElementById('status-banner-success');
+        succ.textContent = "Le compte bancaire a été relié avec succès !";
+        succ.style.display = 'block';
+    } else if (error) {
+        const err = document.getElementById('status-banner-error');
+        if (error === 'verification_failed') {
+            err.textContent = "Échec de la validation de la clé d'accès biométrique.";
+        } else if (error === 'session_expired') {
+            err.textContent = "La session de liaison a expiré. Veuillez réessayer.";
+        } else {
+            err.textContent = "Une erreur est survenue lors de la liaison du compte.";
+        }
+        err.style.display = 'block';
+    }
+
+    // Verify Session
+    fetch('/api/me')
+        .then(res => {
+            if (!res.ok) throw new Error();
+            return res.json();
+        })
+        .then(data => {
+            document.getElementById('user-display').textContent = data.username;
+            loadAccounts();
+        })
+        .catch(() => {
+            window.location.href = '/login';
+        });
+
+    // Logout Action
+    document.getElementById('logout-btn').addEventListener('click', () => {
+        fetch('/api/logout', { method: 'POST' })
+            .then(() => window.location.href = '/login');
+    });
+
+    // Helper: format money
+    function formatMoney(amountCents, currency) {
+        const amount = (amountCents / 100).toFixed(2);
+        if (currency === 'CAD') return `${amount} $ CAD`;
+        if (currency === 'EUR') return `${amount} €`;
+        if (currency === 'USD') return `${amount} $ USD`;
+        return `${amount} ${currency}`;
+    }
+
+    // Load Accounts
+    function loadAccounts() {
+        const listContainer = document.getElementById('accounts-list');
+        fetch('/api/accounts')
+            .then(res => res.json())
+            .then(accounts => {
+                if (accounts.length === 0) {
+                    listContainer.innerHTML = '<div class="empty-state">Aucun compte bancaire relié. Utilisez le panneau de droite pour en ajouter un.</div>';
+                    return;
+                }
+
+                listContainer.innerHTML = '';
+                accounts.forEach(acc => {
+                    const isCredit = acc.account_type === 'CREDIT';
+                    
+                    const item = document.createElement('div');
+                    item.className = 'account-item';
+                    
+                    let limitHtml = '';
+                    if (isCredit) {
+                        limitHtml = `<div class="limit-amount">Limite: ${formatMoney(acc.credit_limit, acc.currency)}</div>`;
+                    }
+
+                    item.innerHTML = `
+                        <div class="account-info">
+                            <span class="account-id">${acc.id}</span>
+                            <div class="account-meta">
+                                <span class="badge ${isCredit ? 'credit' : 'deposit'}">${acc.account_type}</span>
+                                <span class="badge">${acc.status}</span>
+                                <span class="badge">APR: ${acc.apr}%</span>
+                            </div>
+                            <button class="btn-view-tx" onclick="viewTransactions('${acc.id}')">Voir les transactions</button>
+                        </div>
+                        <div class="account-balance">
+                            <span class="balance-amount">${formatMoney(acc.balance, acc.currency)}</span>
+                            ${limitHtml}
+                        </div>
+                    `;
+                    listContainer.appendChild(item);
+                });
+            })
+            .catch(err => {
+                listContainer.innerHTML = '<div class="empty-state" style="color: var(--error)">Erreur lors du chargement des comptes.</div>';
+            });
+    }
+
+    // Link Account Flow
+    const linkForm = document.getElementById('link-form');
+    const linkError = document.getElementById('link-error-box');
+    const linkBtn = document.getElementById('link-submit-btn');
+
+    linkForm.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        linkError.style.display = 'none';
+        linkBtn.disabled = true;
+        const originalText = linkBtn.innerHTML;
+        linkBtn.innerHTML = '<div class="spinner"></div> Initialisation...';
+
+        const accountId = document.getElementById('account-id-input').value.trim();
+
+        try {
+            const res = await fetch('/api/link/begin', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ account_id: accountId })
+            });
+
+            if (!res.ok) {
+                const data = await res.json();
+                throw new Error(data.message || "Impossible d'initier la liaison.");
+            }
+
+            const data = await res.json();
+            // Redirect to passkey-service for verification
+            window.location.href = data.redirect_url;
+        } catch (err) {
+            linkError.textContent = err.message;
+            linkError.style.display = 'block';
+            linkBtn.innerHTML = originalText;
+            linkBtn.disabled = false;
+        }
+    });
+
+    // View Transactions
+    function viewTransactions(accountId) {
+        const txCard = document.getElementById('transactions-card');
+        const txTitle = document.getElementById('transactions-title');
+        const txList = document.getElementById('transactions-list');
+
+        txTitle.textContent = `Transactions du compte ${accountId.substring(0, 8)}`;
+        txList.innerHTML = '<tr><td colspan="4" class="empty-state">Chargement des transactions...</td></tr>';
+        txCard.style.display = 'block';
+        txCard.scrollIntoView({ behavior: 'smooth' });
+
+        fetch(`/api/me`) // just check auth
+            .then(() => fetch(`/api/accounts/${accountId}/transactions`))
+            .then(res => {
+                if (!res.ok) throw new Error("Impossible de charger l'historique.");
+                return res.json();
+            })
+            .then(data => {
+                const txs = data.transactions;
+                if (!txs || txs.length === 0) {
+                    txList.innerHTML = '<tr><td colspan="4" class="empty-state">Aucune transaction trouvée pour ce compte.</td></tr>';
+                    return;
+                }
+
+                txList.innerHTML = '';
+                txs.forEach(tx => {
+                    const row = document.createElement('tr');
+                    const date = new Date(tx.created_at).toLocaleDateString('fr-FR', {
+                        year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit'
+                    });
+                    
+                    const isCredit = tx.direction === 'CREDIT';
+                    const amountClass = isCredit ? 'amount-credit' : 'amount-debit';
+                    const prefix = isCredit ? '+' : '-';
+
+                    row.innerHTML = `
+                        <td>${date}</td>
+                        <td class="tx-type">${tx.type}</td>
+                        <td><span class="badge">${tx.direction}</span></td>
+                        <td><span class="${amountClass}">${prefix} ${(tx.amount / 100).toFixed(2)}</span></td>
+                    `;
+                    txList.appendChild(row);
+                });
+            })
+            .catch(err => {
+                txList.innerHTML = `<tr><td colspan="4" class="empty-state" style="color: var(--error)">${err.message}</td></tr>`;
+            });
+    }
+</script>
+</body>
+</html>

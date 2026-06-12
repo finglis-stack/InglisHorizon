@@ -92,6 +92,22 @@ func (db *DB) migrate() error {
 		return fmt.Errorf("failed to create account_passkeys table: %w", err)
 	}
 
+	// 3. Passkey login sessions table for assertion challenge tracking
+	loginSessionTableQuery := `
+	CREATE TABLE IF NOT EXISTS passkey_login_sessions (
+		id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+		account_id UUID NOT NULL REFERENCES financial_accounts(id) ON DELETE CASCADE,
+		challenge TEXT NOT NULL,
+		user_id BYTEA NOT NULL,
+		expires_at TIMESTAMP WITH TIME ZONE NOT NULL,
+		created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+	);
+	`
+	_, err = db.Pool.Exec(ctx, loginSessionTableQuery)
+	if err != nil {
+		return fmt.Errorf("failed to create passkey_login_sessions table: %w", err)
+	}
+
 	log.Println("Database migrations executed successfully")
 	return nil
 }

@@ -134,6 +134,8 @@ func main() {
 	r.Get("/tokens/{token}", getTargetAccountHandler)
 	r.Get("/register/begin", startRegistrationHandler)
 	r.Post("/register/finish", finishRegistrationHandler)
+	r.Get("/auth/begin", startLoginHandler)
+	r.Post("/auth/finish", finishLoginHandler)
 
 	// Serve Static Files
 	workDir, _ := os.Getwd()
@@ -425,6 +427,183 @@ func finishRegistrationHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(map[string]string{"status": "success", "message": "Passkey linked successfully!"})
+}
+
+// Handler: GET /auth/begin
+func startLoginHandler(w http.ResponseWriter, r *http.Request) {
+	accountID := r.URL.Query().Get("account_id")
+	if accountID == "" {
+		http.Error(w, `{"message":"Missing account_id parameter"}`, http.StatusBadRequest)
+		return
+	}
+
+	// Load user credentials
+	existingCreds, err := wl.LoadUserCredentials(r.Context(), database.Pool, accountID)
+	if err != nil {
+		log.Printf("ERROR: Failed to load user credentials: %v", err)
+		http.Error(w, `{"message":"Internal Server Error"}`, http.StatusInternalServerError)
+		return
+	}
+
+	if len(existingCreds) == 0 {
+		http.Error(w, `{"message":"No credentials registered for this account"}`, http.StatusNotFound)
+		return
+	}
+
+	user := &wl.PasskeyUser{
+		ID:          []byte(accountID),
+		Name:        accountID,
+		DisplayName: "Compte " + accountID[:8],
+		Credentials: existingCreds,
+	}
+
+	options, sessionData, err := webAuthn.BeginLogin(user)
+	if err != nil {
+		log.Printf("ERROR: WebAuthn BeginLogin failed: %v", err)
+		http.Error(w, `{"message":"Failed to generate login options"}`, http.StatusInternalServerError)
+		return
+	}
+
+	sessionJSON, err := json.Marshal(sessionData)
+	if err != nil {
+		http.Error(w, `{"message":"Internal Server Error"}`, http.StatusInternalServerError)
+		return
+	}
+
+	expiresAt := time.Now().Add(15 * time.Minute)
+	sessionID := uuidStr()
+	query := `
+		INSERT INTO passkey_login_sessions (id, account_id, challenge, user_id, expires_at)
+		VALUES ($1, $2, $3, $4, $5)
+	`
+	_, err = database.Pool.Exec(r.Context(), query, sessionID, accountID, string(sessionJSON), sessionData.UserID, expiresAt)
+	if err != nil {
+		log.Printf("ERROR: Failed to save login session: %v", err)
+		http.Error(w, `{"message":"Internal Server Error"}`, http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"options":    options,
+		"session_id": sessionID,
+	})
+}
+
+// Handler: POST /auth/finish
+func finishLoginHandler(w http.ResponseWriter, r *http.Request) {
+	sessionID := r.URL.Query().Get("session_id")
+	portalSessionID := r.URL.Query().Get("portal_session_id")
+	if sessionID == "" {
+		http.Error(w, `{"message":"Missing session_id parameter"}`, http.StatusBadRequest)
+		return
+	}
+
+	var accountID string
+	var sessionJSON string
+	var expiresAt time.Time
+
+	query := "SELECT account_id, challenge, expires_at FROM passkey_login_sessions WHERE id = $1"
+	err := database.Pool.QueryRow(r.Context(), query, sessionID).Scan(&accountID, &sessionJSON, &expiresAt)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			http.Error(w, `{"message":"Session not found"}`, http.StatusNotFound)
+			return
+		}
+		http.Error(w, `{"message":"Internal Server Error"}`, http.StatusInternalServerError)
+		return
+	}
+
+	if time.Now().After(expiresAt) {
+		http.Error(w, `{"message":"Session expired"}`, http.StatusBadRequest)
+		return
+	}
+
+	var sessionData webauthn.SessionData
+	if err := json.Unmarshal([]byte(sessionJSON), &sessionData); err != nil {
+		http.Error(w, `{"message":"Internal Server Error"}`, http.StatusInternalServerError)
+		return
+	}
+
+	existingCreds, err := wl.LoadUserCredentials(r.Context(), database.Pool, accountID)
+	if err != nil {
+		http.Error(w, `{"message":"Internal Server Error"}`, http.StatusInternalServerError)
+		return
+	}
+
+	user := &wl.PasskeyUser{
+		ID:          []byte(accountID),
+		Name:        accountID,
+		DisplayName: "Compte " + accountID[:8],
+		Credentials: existingCreds,
+	}
+
+	credential, err := webAuthn.FinishLogin(user, sessionData, r)
+	if err != nil {
+		log.Printf("ERROR: WebAuthn FinishLogin failed: %v", err)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]string{"message": err.Error()})
+		return
+	}
+
+	_, err = database.Pool.Exec(r.Context(), "UPDATE account_passkeys SET sign_counter = $1 WHERE credential_id = $2", int64(credential.Authenticator.SignCount), credential.ID)
+	if err != nil {
+		log.Printf("ERROR: Failed to update sign counter: %v", err)
+	}
+
+	_, _ = database.Pool.Exec(r.Context(), "DELETE FROM passkey_login_sessions WHERE id = $1", sessionID)
+
+	if portalSessionID != "" {
+		portalURL := os.Getenv("PORTAL_SERVICE_URL")
+		if portalURL == "" {
+			portalURL = "http://portal-service.railway.internal"
+		}
+
+		log.Printf("AUDIT: Notifying portal of successful passkey verification for account %s, session %s", accountID, portalSessionID)
+
+		notifyReq, err := json.Marshal(map[string]string{
+			"portal_session_id": portalSessionID,
+			"account_id":        accountID,
+		})
+		if err == nil {
+			claims := &Claims{
+				Role: "MANAGER",
+				RegisteredClaims: jwt.RegisteredClaims{
+					ExpiresAt: jwt.NewNumericDate(time.Now().Add(1 * time.Minute)),
+					Issuer:    "passkey-service",
+				},
+			}
+			token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+			tokenString, err := token.SignedString(jwtSecretKey)
+			if err == nil {
+				client := &http.Client{Timeout: 5 * time.Second}
+				req, err := http.NewRequest("POST", portalURL+"/internal/verify-link", bytes.NewBuffer(notifyReq))
+				if err == nil {
+					req.Header.Set("Content-Type", "application/json")
+					req.Header.Set("Authorization", "Bearer "+tokenString)
+					resp, err := client.Do(req)
+					if err != nil {
+						log.Printf("ERROR: Failed to notify portal service: %v", err)
+					} else {
+						defer resp.Body.Close()
+						if resp.StatusCode != http.StatusOK {
+							body, _ := io.ReadAll(resp.Body)
+							log.Printf("ERROR: Portal service returned status %d: %s", resp.StatusCode, string(body))
+						} else {
+							log.Printf("AUDIT: Portal service successfully notified for session %s", portalSessionID)
+						}
+					}
+				}
+			}
+		}
+	}
+
+	log.Printf("AUDIT: Passkey login verified successfully for account %s", accountID)
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]string{"status": "success", "message": "Passkey verified successfully!"})
 }
 
 // Helpers
