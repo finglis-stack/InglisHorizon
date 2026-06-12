@@ -28,6 +28,7 @@ var (
 	paymentAPIURL   string
 	antifraudAPIURL string
 	merchantAPIURL  string
+	passkeyAPIURL   string
 
 	// Email validation regex
 	emailRegex = regexp.MustCompile(`^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}$`)
@@ -53,6 +54,10 @@ func init() {
 	merchantAPIURL = os.Getenv("MERCHANT_SERVICE_URL")
 	if merchantAPIURL == "" {
 		merchantAPIURL = "https://merchant.inglistransit.com"
+	}
+	passkeyAPIURL = os.Getenv("PASSKEY_SERVICE_URL")
+	if passkeyAPIURL == "" {
+		passkeyAPIURL = "https://pass.inglishorizon.com"
 	}
 }
 
@@ -96,6 +101,7 @@ func main() {
 			fmt.Println("  search-merchant                 - Trouver un marchand par ID, NEQ, ou courriel")
 			fmt.Println("  list-merchants                  - Lister l'ensemble des marchands du réseau")
 			fmt.Println("  delete-merchant                 - Supprimer un marchand par ID")
+			fmt.Println("  create-passkey-link             - Générer un lien d'association de Clé d'Accès")
 			fmt.Println("  status                          - Vérifier la connexion serveur")
 			fmt.Println("  clear                           - Nettoyer l'écran")
 			fmt.Println("  logout                          - Se déconnecter")
@@ -167,6 +173,13 @@ func main() {
 				continue
 			}
 			deleteMerchant()
+
+		case "create-passkey-link":
+			if jwtToken == "" {
+				fmt.Println("Erreur: Vous devez être connecté.")
+				continue
+			}
+			createPasskeyLink()
 
 		case "clear":
 			fmt.Print("\033[H\033[2J")
@@ -1532,4 +1545,98 @@ func deleteMerchant() {
 		fmt.Printf("ÉCHEC de la suppression (Code %d).\n", resp.StatusCode)
 	}
 }
+
+func createPasskeyLink() {
+	if jwtToken == "" {
+		fmt.Println("Erreur: Vous devez être connecté.")
+		return
+	}
+
+	fmt.Println("\n--- Assistant de liaison de Clé d'Accès (Passkey) ---")
+
+	var email string
+	if err := survey.AskOne(&survey.Input{Message: "Courriel de l'utilisateur/marchand:"}, &email); err != nil {
+		return
+	}
+	email = strings.TrimSpace(email)
+	if email == "" {
+		return
+	}
+
+	// Fetch or select their financial account
+	accountID := selectAccountInteractive(email, "Sélectionnez le compte financier à lier à la Clé d'Accès:")
+	if accountID == "" {
+		fmt.Println("Annulation: Aucun compte sélectionné.")
+		return
+	}
+
+	// Prepare token request
+	payload := map[string]string{
+		"account_id": accountID,
+	}
+	jsonData, err := json.Marshal(payload)
+	if err != nil {
+		fmt.Println("Erreur: Impossible de préparer les données.")
+		return
+	}
+
+	req, err := http.NewRequest("POST", passkeyAPIURL+"/tokens", bytes.NewBuffer(jsonData))
+	if err != nil {
+		fmt.Println("Erreur: Impossible de créer la requête.")
+		return
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+jwtToken)
+
+	client := &http.Client{Timeout: 10 * time.Second}
+	fmt.Print("\nGénération du jeton sécurisé de liaison... ")
+
+	resp, err := client.Do(req)
+	if err != nil {
+		fmt.Println("ÉCHEC: Serveur Passkey injoignable.")
+		return
+	}
+	defer resp.Body.Close()
+
+	bodyBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		fmt.Println("ÉCHEC: Impossible de lire la réponse.")
+		return
+	}
+
+	if resp.StatusCode == http.StatusCreated {
+		var result map[string]string
+		if err := json.Unmarshal(bodyBytes, &result); err != nil {
+			fmt.Println("ÉCHEC: Données corrompues.")
+			return
+		}
+
+		token := result["token"]
+		expiresAtStr := result["expires_at"]
+		expiresAt, _ := time.Parse(time.RFC3339, expiresAtStr)
+
+		linkURL := fmt.Sprintf("%s/link/?token=%s", passkeyAPIURL, token)
+
+		fmt.Println("SUCCÈS !")
+		fmt.Println("\n=====================================================================")
+		fmt.Println("               LIEN D'ASSOCIATION DE CLÉ D'ACCÈS                     ")
+		fmt.Println("=====================================================================")
+		fmt.Printf("Compte lié : %s\n", accountID)
+		fmt.Printf("Expire le   : %s (valide 15 minutes)\n", expiresAt.Local().Format("2006-01-02 15:04:05"))
+		fmt.Println("---------------------------------------------------------------------")
+		fmt.Println("Donnez ce lien sécurisé à l'utilisateur final pour l'enregistrement :")
+		fmt.Printf("\n  %s\n", linkURL)
+		fmt.Println("=====================================================================")
+		fmt.Println()
+	} else {
+		fmt.Println("ÉCHEC.")
+		var errData map[string]interface{}
+		if json.Unmarshal(bodyBytes, &errData) == nil && errData["message"] != nil {
+			fmt.Printf("Raison : %v\n\n", errData["message"])
+		} else {
+			fmt.Printf("Code HTTP : %d\n\n", resp.StatusCode)
+		}
+	}
+}
+
 

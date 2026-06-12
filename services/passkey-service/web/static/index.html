@@ -1,0 +1,458 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Association de Clé d'Accès - Inglis Horizon</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-color: #f9fafb;
+            --text-main: #111827;
+            --text-muted: #4b5563;
+            --border-color: #e5e7eb;
+            --primary: #111827;
+            --primary-hover: #374151;
+            --success: #059669;
+            --error: #dc2626;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text-main);
+            min-height: 100vh;
+            display: flex;
+            margin: 0;
+            padding: 0;
+        }
+
+        .split-container {
+            display: flex;
+            width: 100%;
+            min-height: 100vh;
+        }
+
+        /* Hero Section */
+        .hero-section {
+            flex: 1.2;
+            background: linear-gradient(rgba(17, 24, 39, 0.4), rgba(17, 24, 39, 0.6)), url('/link/hero.jpg') no-repeat center center;
+            background-size: cover;
+            display: flex;
+            flex-direction: column;
+            justify-content: flex-end;
+            padding: 60px;
+            color: #ffffff;
+            position: relative;
+        }
+
+        .hero-logo {
+            position: absolute;
+            top: 40px;
+            left: 60px;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            font-size: 18px;
+            font-weight: 700;
+            letter-spacing: -0.5px;
+            text-transform: uppercase;
+        }
+
+        .hero-logo svg {
+            width: 24px;
+            height: 24px;
+            fill: none;
+            stroke: currentColor;
+            stroke-width: 2;
+        }
+
+        .hero-title {
+            font-size: 36px;
+            font-weight: 700; /* Font weight is bold, not thin */
+            line-height: 1.2;
+            margin-bottom: 16px;
+            letter-spacing: -0.02em;
+            max-width: 500px;
+        }
+
+        .hero-subtitle {
+            font-size: 15px;
+            line-height: 1.5;
+            color: rgba(255, 255, 255, 0.85);
+            max-width: 440px;
+        }
+
+        /* Form Section */
+        .form-section {
+            flex: 1;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background-color: #ffffff;
+            padding: 40px;
+            border-left: 1px solid var(--border-color);
+        }
+
+        .card {
+            width: 100%;
+            max-width: 400px;
+            padding: 20px 0;
+            text-align: left;
+        }
+
+        h2 {
+            font-size: 24px;
+            font-weight: 700;
+            margin-bottom: 12px;
+            letter-spacing: -0.5px;
+            color: var(--text-main);
+        }
+
+        .subtitle {
+            font-size: 14px;
+            color: var(--text-muted);
+            line-height: 1.5;
+            margin-bottom: 32px;
+        }
+
+        .account-box {
+            background-color: #f9fafb;
+            border: 1px solid var(--border-color);
+            border-radius: 0; /* Rectangle, no rounded corners */
+            padding: 20px;
+            margin-bottom: 32px;
+        }
+
+        .account-label {
+            font-size: 11px;
+            text-transform: uppercase;
+            letter-spacing: 1.5px;
+            color: var(--text-muted);
+            margin-bottom: 8px;
+            font-weight: 600;
+        }
+
+        .account-id {
+            font-size: 15px;
+            font-weight: 600;
+            font-family: monospace;
+            color: var(--text-main);
+            word-break: break-all;
+        }
+
+        .account-currency {
+            display: inline-block;
+            margin-top: 10px;
+            background-color: #1f2937;
+            color: #ffffff;
+            padding: 2px 10px;
+            font-size: 11px;
+            font-weight: 700;
+            border-radius: 0; /* Rectangle */
+        }
+
+        .btn {
+            width: 100%;
+            background-color: var(--primary);
+            color: #ffffff;
+            border: none;
+            border-radius: 0; /* Rectangle */
+            padding: 16px 24px;
+            font-size: 15px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: background-color 0.2s ease;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+        }
+
+        .btn:hover {
+            background-color: var(--primary-hover);
+        }
+
+        .btn:disabled {
+            background-color: #d1d5db;
+            color: #9ca3af;
+            cursor: not-allowed;
+        }
+
+        /* Success / Loading / Error states */
+        .status-container {
+            display: none;
+        }
+
+        .spinner {
+            width: 20px;
+            height: 20px;
+            border: 2px solid rgba(255, 255, 255, 0.3);
+            border-radius: 50%;
+            border-top-color: #ffffff;
+            animation: spin 0.8s linear infinite;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        .success-icon {
+            width: 64px;
+            height: 64px;
+            border-radius: 0; /* Rectangle */
+            background-color: #ecfdf5;
+            border: 2px solid var(--success);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin-bottom: 24px;
+            color: var(--success);
+        }
+
+        .success-icon svg {
+            width: 32px;
+            height: 32px;
+            stroke: var(--success);
+            stroke-width: 3;
+            fill: none;
+        }
+
+        .error-banner {
+            background-color: #fee2e2;
+            border: 1px solid #fecaca;
+            color: #991b1b;
+            padding: 16px;
+            border-radius: 0; /* Rectangle */
+            font-size: 13px;
+            margin-bottom: 24px;
+            line-height: 1.4;
+            display: none;
+        }
+
+        /* Responsive Layout */
+        @media (max-width: 860px) {
+            .split-container {
+                flex-direction: column;
+            }
+            .hero-section {
+                height: 320px;
+                padding: 40px;
+                justify-content: center;
+            }
+            .hero-logo {
+                top: 30px;
+                left: 40px;
+            }
+            .hero-title {
+                font-size: 28px;
+                margin-top: 40px;
+            }
+            .form-section {
+                padding: 40px 20px;
+                border-left: none;
+            }
+            .card {
+                padding: 0;
+            }
+        }
+    </style>
+</head>
+<body>
+
+<div class="split-container">
+    <!-- Hero Left Panel -->
+    <div class="hero-section">
+        <div class="hero-logo">
+            <svg viewBox="0 0 24 24">
+                <rect x="3" y="11" width="18" height="11" rx="0" ry="0"></rect>
+                <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
+            </svg>
+            Inglis Horizon
+        </div>
+        <h1 class="hero-title">Sécurité Biométrique</h1>
+        <p class="hero-subtitle">Associez une clé d'accès (Passkey) à votre compte pour autoriser et valider instantanément vos transactions.</p>
+    </div>
+
+    <!-- Form Right Panel -->
+    <div class="form-section">
+        <!-- Main Linking View -->
+        <div id="main-view" class="card">
+            <h2>Lier une Clé d'Accès</h2>
+            <p class="subtitle">Enregistrez l'authentification par empreinte digitale ou FaceID intégrée à cet appareil.</p>
+
+            <div id="error-box" class="error-banner"></div>
+
+            <div class="account-box">
+                <div class="account-label">Compte Cible</div>
+                <div id="target-account-id" class="account-id">Chargement...</div>
+                <div id="target-account-currency" class="account-currency" style="display:none">...</div>
+            </div>
+
+            <button id="register-btn" class="btn" disabled>
+                Associer mon Passkey
+            </button>
+        </div>
+
+        <!-- Success View -->
+        <div id="success-view" class="card status-container">
+            <div class="success-icon">
+                <svg viewBox="0 0 24 24">
+                    <polyline points="20 6 9 17 4 12"></polyline>
+                </svg>
+            </div>
+            <h2 style="color: var(--success);">Clé d'Accès Liée</h2>
+            <p class="subtitle" style="margin-bottom: 0;">Votre clé d'accès biométrique a été configurée et liée à votre compte avec succès. Vous pouvez à présent fermer cet onglet.</p>
+        </div>
+    </div>
+</div>
+
+<script>
+    // --- Helper functions for WebAuthn Base64URL conversions ---
+    function base64urlToBuffer(base64url) {
+        let base64 = base64url.replace(/-/g, '+').replace(/_/g, '/');
+        let pad = base64.length % 4;
+        if (pad) {
+            if (pad === 2) base64 += '==';
+            else if (pad === 3) base64 += '=';
+        }
+        let binary = window.atob(base64);
+        let bytes = new Uint8Array(binary.length);
+        for (let i = 0; i < binary.length; i++) {
+            bytes[i] = binary.charCodeAt(i);
+        }
+        return bytes.buffer;
+    }
+
+    function bufferToBase64url(buffer) {
+        let bytes = new Uint8Array(buffer);
+        let binary = '';
+        for (let i = 0; i < bytes.byteLength; i++) {
+            binary += String.fromCharCode(bytes[i]);
+        }
+        let base64 = window.btoa(binary);
+        return base64.replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
+    }
+
+    // --- Page Logic ---
+    const urlParams = new URLSearchParams(window.location.search);
+    const token = urlParams.get('token');
+    const registerBtn = document.getElementById('register-btn');
+    const errorBox = document.getElementById('error-box');
+
+    function showError(message) {
+        errorBox.textContent = message;
+        errorBox.style.display = 'block';
+    }
+
+    function hideError() {
+        errorBox.style.display = 'none';
+    }
+
+    if (!token) {
+        showError("Lien invalide : Jeton de liaison manquant.");
+        document.getElementById('target-account-id').textContent = "Jeton manquant";
+    } else {
+        // Fetch Token Info
+        fetch(`/tokens/${token}`)
+            .then(res => {
+                if (!res.ok) {
+                    throw new Error("Le lien a expiré ou est invalide.");
+                }
+                return res.json();
+            })
+            .then(data => {
+                document.getElementById('target-account-id').textContent = data.account_id;
+                const curBadge = document.getElementById('target-account-currency');
+                curBadge.textContent = data.currency;
+                curBadge.style.display = 'inline-block';
+                registerBtn.disabled = false;
+            })
+            .catch(err => {
+                showError(err.message);
+                document.getElementById('target-account-id').textContent = "Erreur de validation";
+            });
+    }
+
+    registerBtn.addEventListener('click', async () => {
+        registerBtn.disabled = true;
+        hideError();
+        const originalText = registerBtn.innerHTML;
+        registerBtn.innerHTML = '<div class="spinner"></div> Authentification...';
+
+        try {
+            // 1. Get Registration Options
+            const optionsRes = await fetch(`/register/begin?token=${token}`);
+            if (!optionsRes.ok) {
+                const errData = await optionsRes.json();
+                throw new Error(errData.message || "Impossible de démarrer l'enregistrement.");
+            }
+            
+            const options = await optionsRes.json();
+
+            // Transform string Base64URL back to ArrayBuffers
+            options.publicKey.challenge = base64urlToBuffer(options.publicKey.challenge);
+            options.publicKey.user.id = base64urlToBuffer(options.publicKey.user.id);
+            if (options.publicKey.excludeCredentials) {
+                options.publicKey.excludeCredentials.forEach(cred => {
+                    cred.id = base64urlToBuffer(cred.id);
+                });
+            }
+
+            // Force biometric/FaceID restrictions
+            options.publicKey.authenticatorSelection = {
+                authenticatorAttachment: "platform", // FaceID / TouchID / built-in biometrics
+                userVerification: "required",        // Force verification
+                requireResidentKey: false
+            };
+
+            // 2. Browser Passkey Creation
+            const credential = await navigator.credentials.create({
+                publicKey: options.publicKey
+            });
+
+            // 3. Serialize Credential to JSON with Base64URL
+            const serializedCredential = {
+                id: credential.id,
+                rawId: bufferToBase64url(credential.rawId),
+                type: credential.type,
+                response: {
+                    clientDataJSON: bufferToBase64url(credential.response.clientDataJSON),
+                    attestationObject: bufferToBase64url(credential.response.attestationObject)
+                }
+            };
+
+            // 4. Send Credential to Server
+            const finishRes = await fetch(`/register/finish?token=${token}`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(serializedCredential)
+            });
+
+            if (!finishRes.ok) {
+                const errData = await finishRes.json();
+                throw new Error(errData.message || "Échec de validation du Passkey.");
+            }
+
+            // Show Success View
+            document.getElementById('main-view').style.display = 'none';
+            document.getElementById('success-view').style.display = 'block';
+
+        } catch (err) {
+            console.error(err);
+            showError(err.message || "Une erreur inconnue est survenue.");
+            registerBtn.innerHTML = originalText;
+            registerBtn.disabled = false;
+        }
+    });
+</script>
+</body>
+</html>
