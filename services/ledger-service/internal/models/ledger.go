@@ -270,19 +270,68 @@ func AccrueDailyInterest(ctx context.Context, db *pgxpool.Pool, batchID string) 
 			continue
 		}
 
-		balance, err := GetBalance(ctx, db, accountID)
-		if err != nil || balance >= 0 {
-			// In our schema, if balance >= 0, they don't owe money (or they overpaid).
-			// Depending on the bank's rules, interest is only on owed money (negative balance).
-			// For a CREDIT account, a debit balance (negative here, since CREDIT adds, DEBIT subtracts) means they owe money.
-			// Wait: if they BUY something with a credit card, we DEBIT their account. So balance becomes negative.
+		// 1. Fetch total credits (payments/refunds)
+		var totalCredits int64
+		err = db.QueryRow(ctx, "SELECT COALESCE(SUM(amount), 0) FROM entries WHERE account_id = $1 AND direction = 'CREDIT'", accountID).Scan(&totalCredits)
+		if err != nil {
+			log.Printf("Error getting credits for account %s: %v", accountID, err)
 			continue
 		}
 
-		// Calculate daily interest. 
-		// If balance is -100000 (-$1000.00), interest is (100000 * 0.1999) / 365
-		owed := -balance // Positive amount owed
-		dailyInterest := int64((float64(owed) * (apr / 100.0)) / 365.0)
+		// 2. Fetch all debits (purchases) that are NOT interest charges to prevent interest compounding
+		debitQuery := `
+			SELECT e.amount, e.created_at 
+			FROM entries e 
+			JOIN transactions t ON e.transaction_id = t.id 
+			WHERE e.account_id = $1 AND e.direction = 'DEBIT' AND t.type != 'INTEREST_CHARGE'
+			ORDER BY e.created_at ASC
+		`
+		debitRows, err := db.Query(ctx, debitQuery, accountID)
+		if err != nil {
+			log.Printf("Error querying debits for account %s: %v", accountID, err)
+			continue
+		}
+		
+		type debitItem struct {
+			amount    int64
+			createdAt time.Time
+		}
+		var debits []debitItem
+		for debitRows.Next() {
+			var d debitItem
+			if err := debitRows.Scan(&d.amount, &d.createdAt); err == nil {
+				debits = append(debits, d)
+			}
+		}
+		debitRows.Close()
+
+		// 3. FIFO match credits against debits to find unpaid debits older than 21 days (grace period)
+		var interestBase int64 = 0
+		now := time.Now()
+		for _, debit := range debits {
+			unpaidAmount := debit.amount
+			if totalCredits >= unpaidAmount {
+				totalCredits -= unpaidAmount
+				unpaidAmount = 0
+			} else if totalCredits > 0 {
+				unpaidAmount -= totalCredits
+				totalCredits = 0
+			}
+
+			if unpaidAmount > 0 {
+				// Only charge interest if the purchase was made > 21 days ago
+				if now.Sub(debit.createdAt) > 21*24*time.Hour {
+					interestBase += unpaidAmount
+				}
+			}
+		}
+
+		if interestBase <= 0 {
+			continue
+		}
+
+		// Calculate daily interest on interestBase (simple interest, not compounded)
+		dailyInterest := int64((float64(interestBase) * (apr / 100.0)) / 365.0)
 
 		if dailyInterest <= 0 {
 			continue

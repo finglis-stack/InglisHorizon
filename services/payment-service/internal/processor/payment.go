@@ -9,10 +9,84 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 )
+
+var (
+	ratesCache     map[string]float64
+	ratesCacheTime time.Time
+	ratesMutex     sync.RWMutex
+)
+
+func getRates() map[string]float64 {
+	ratesMutex.RLock()
+	if !ratesCacheTime.IsZero() && time.Since(ratesCacheTime) < 1*time.Hour {
+		defer ratesMutex.RUnlock()
+		return ratesCache
+	}
+	ratesMutex.RUnlock()
+
+	ratesMutex.Lock()
+	defer ratesMutex.Unlock()
+
+	// Double check cache
+	if !ratesCacheTime.IsZero() && time.Since(ratesCacheTime) < 1*time.Hour {
+		return ratesCache
+	}
+
+	log.Println("[CURRENCY EXCHANGE] Fetching live rates from API...")
+	client := &http.Client{Timeout: 3 * time.Second}
+	resp, err := client.Get("https://open.er-api.com/v6/latest/CAD")
+	if err != nil {
+		log.Printf("[CURRENCY EXCHANGE] Failed to fetch live rates: %v. Using fallback rates.", err)
+		return getFallbackRates()
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		log.Printf("[CURRENCY EXCHANGE] Live API returned status %d. Using fallback rates.", resp.StatusCode)
+		return getFallbackRates()
+	}
+
+	var data struct {
+		Result   string             `json:"result"`
+		BaseCode string             `json:"base_code"`
+		Rates    map[string]float64 `json:"rates"`
+	}
+
+	if err := json.NewDecoder(resp.Body).Decode(&data); err != nil || data.Result != "success" || data.Rates == nil {
+		log.Printf("[CURRENCY EXCHANGE] Failed to decode API response: %v. Using fallback rates.", err)
+		return getFallbackRates()
+	}
+
+	// We have the live rates! Since API rates are CAD to target (e.g. 1 CAD = 0.73 USD),
+	// but we want rates to CAD (e.g. 1 USD = 1.37 CAD) in order to keep the math:
+	// ratesCAD[CUR] = 1.0 / data.Rates[CUR]
+	liveRates := make(map[string]float64)
+	liveRates["CAD"] = 1.0
+	for cur, rate := range data.Rates {
+		if rate > 0 {
+			liveRates[cur] = 1.0 / rate
+		}
+	}
+
+	ratesCache = liveRates
+	ratesCacheTime = time.Now()
+	log.Printf("[CURRENCY EXCHANGE] Live rates updated: CAD=1.0, USD=%.4f, EUR=%.4f, JPY=%.6f", liveRates["USD"], liveRates["EUR"], liveRates["JPY"])
+	return ratesCache
+}
+
+func getFallbackRates() map[string]float64 {
+	return map[string]float64{
+		"CAD": 1.0,
+		"USD": 1.37,
+		"EUR": 1.47,
+		"JPY": 0.0087,
+	}
+}
 
 type PaymentRequest struct {
 	Type           string `json:"type"` // "PAYMENT" or "DEPOSIT"
@@ -263,12 +337,7 @@ func convertCurrency(amount int64, fromCur, toCur string) (int64, error) {
 		return amount, nil
 	}
 
-	rates := map[string]float64{
-		"CAD": 1.0,
-		"USD": 1.37,    // 1 USD = 1.37 CAD
-		"EUR": 1.47,    // 1 EUR = 1.47 CAD
-		"JPY": 0.0087,  // 1 JPY = 0.0087 CAD
-	}
+	rates := getRates()
 
 	fromRate, ok1 := rates[fromCur]
 	toRate, ok2 := rates[toCur]
