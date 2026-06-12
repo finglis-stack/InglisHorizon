@@ -97,6 +97,9 @@ func main() {
 	r.Get("/account", func(w http.ResponseWriter, r *http.Request) {
 		http.ServeFile(w, r, staticDir+"/account.html")
 	})
+	r.Get("/link", func(w http.ResponseWriter, r *http.Request) {
+		http.ServeFile(w, r, staticDir+"/link.html")
+	})
 	
 	// Helper to serve CSS/images or JS assets if needed
 	fileServer(r, "/assets", http.Dir(staticDir))

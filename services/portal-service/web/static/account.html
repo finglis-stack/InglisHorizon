@@ -374,7 +374,7 @@
 
 <div class="container">
     <div id="account-card" class="card">
-        <div class="account-header-box">
+        <div class="account-header-box" style="border-bottom: none; padding-bottom: 12px; margin-bottom: 12px;">
             <div class="account-meta-info">
                 <div id="account-name-display" class="account-name">Chargement...</div>
                 <span id="account-id-display" class="account-id"></span>
@@ -390,6 +390,9 @@
                 <div id="credit-limit-display" class="credit-limit-info"></div>
             </div>
         </div>
+        
+        <div id="credit-usage-box"></div>
+        <div style="border-bottom: 1px solid var(--border-color); margin-bottom: 24px;"></div>
 
         <div class="tab-menu">
             <button id="tab-tx" class="tab-btn active" onclick="switchTab('tx')">Historique des transactions</button>
@@ -508,13 +511,32 @@
 
                 document.getElementById('badge-status').textContent = acc.status;
                 document.getElementById('badge-apr').textContent = `APR: ${acc.apr}%`;
-                document.getElementById('balance-display').textContent = formatMoney(acc.balance, acc.currency);
+                const isCredit = acc.account_type === 'CREDIT';
+                const availableBalance = isCredit ? (acc.credit_limit - Math.abs(acc.balance)) : acc.balance;
+                document.getElementById('balance-display').textContent = formatMoney(availableBalance, acc.currency);
 
                 const limitDisplay = document.getElementById('credit-limit-display');
-                if (acc.account_type === 'CREDIT') {
-                    limitDisplay.textContent = `Limite de crédit: ${formatMoney(acc.credit_limit, acc.currency)}`;
+                const usageBox = document.getElementById('credit-usage-box');
+                if (isCredit) {
+                    limitDisplay.textContent = `Utilisé : ${formatMoney(Math.abs(acc.balance), acc.currency)} / Limite : ${formatMoney(acc.credit_limit, acc.currency)}`;
+                    
+                    const usePercentage = acc.credit_limit > 0 ? Math.min(100, Math.max(0, (Math.abs(acc.balance) / acc.credit_limit) * 100)) : 0;
+                    const barColor = usePercentage > 90 ? 'var(--error)' : usePercentage > 75 ? '#d97706' : 'var(--primary)';
+                    
+                    usageBox.innerHTML = `
+                        <div class="credit-usage-container" style="width: 100%; margin-top: 10px; margin-bottom: 24px;">
+                            <div style="display: flex; justify-content: space-between; font-size: 11px; color: var(--text-muted); margin-bottom: 6px;">
+                                <span style="font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px;">Utilisation de la limite : ${usePercentage.toFixed(1)}%</span>
+                                <span>${formatMoney(Math.abs(acc.balance), acc.currency)} / ${formatMoney(acc.credit_limit, acc.currency)}</span>
+                            </div>
+                            <div class="progress-bar-bg" style="width: 100%; height: 6px; background-color: #f3f4f6; position: relative;">
+                                <div class="progress-bar-fill" style="width: ${usePercentage}%; height: 100%; background-color: ${barColor}; transition: width 0.3s ease;"></div>
+                            </div>
+                        </div>
+                    `;
                 } else {
                     limitDisplay.textContent = '';
+                    usageBox.innerHTML = '';
                 }
             })
             .catch(err => {

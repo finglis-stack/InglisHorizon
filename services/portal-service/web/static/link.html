@@ -1,0 +1,320 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Relier un compte - Inglis Horizon</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-color: #f9fafb;
+            --text-main: #111827;
+            --text-muted: #4b5563;
+            --border-color: #e5e7eb;
+            --primary: #111827;
+            --primary-hover: #374151;
+            --success: #059669;
+            --error: #dc2626;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text-main);
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+
+        header {
+            background-color: #ffffff;
+            border-bottom: 1px solid var(--border-color);
+            padding: 20px 40px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .logo {
+            font-size: 18px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: -0.5px;
+            cursor: pointer;
+        }
+
+        .back-btn {
+            background: none;
+            border: 1px solid var(--border-color);
+            padding: 8px 16px;
+            cursor: pointer;
+            font-weight: 600;
+            font-size: 12px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            transition: all 0.2s ease;
+            text-decoration: none;
+            color: var(--text-main);
+            display: inline-block;
+        }
+
+        .back-btn:hover {
+            background-color: #f3f4f6;
+            border-color: var(--text-main);
+        }
+
+        .container {
+            max-width: 600px;
+            width: 100%;
+            margin: 60px auto;
+            padding: 0 40px;
+            flex: 1;
+        }
+
+        h2 {
+            font-size: 24px;
+            font-weight: 700;
+            margin-bottom: 12px;
+            letter-spacing: -0.5px;
+        }
+
+        .card {
+            background-color: #ffffff;
+            border: 1px solid var(--border-color);
+            padding: 40px;
+        }
+
+        .subtitle {
+            font-size: 13px;
+            color: var(--text-muted);
+            line-height: 1.6;
+            margin-bottom: 30px;
+        }
+
+        .form-group {
+            margin-bottom: 24px;
+        }
+
+        label {
+            display: block;
+            font-size: 11px;
+            text-transform: uppercase;
+            letter-spacing: 1.5px;
+            color: var(--text-muted);
+            margin-bottom: 8px;
+            font-weight: 600;
+        }
+
+        input {
+            width: 100%;
+            padding: 14px 16px;
+            font-size: 14px;
+            border: 1px solid var(--border-color);
+            background-color: #f9fafb;
+            color: var(--text-main);
+            border-radius: 0;
+            outline: none;
+            font-family: inherit;
+        }
+
+        input:focus {
+            border-color: var(--primary);
+            background-color: #ffffff;
+        }
+
+        .btn-link {
+            width: 100%;
+            background-color: var(--primary);
+            color: #ffffff;
+            border: none;
+            padding: 16px 24px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: background-color 0.2s ease;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .btn-link:hover {
+            background-color: var(--primary-hover);
+        }
+
+        .error-banner {
+            background-color: #fee2e2;
+            border: 1px solid #fecaca;
+            color: #991b1b;
+            padding: 16px;
+            font-size: 13px;
+            margin-bottom: 24px;
+            line-height: 1.4;
+            display: none;
+        }
+
+        .spinner {
+            width: 20px;
+            height: 20px;
+            border: 2px solid rgba(255, 255, 255, 0.3);
+            border-radius: 50%;
+            border-top-color: #ffffff;
+            animation: spin 0.8s linear infinite;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        /* Wizard Steps */
+        .wizard-steps {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 30px;
+            margin-top: 10px;
+        }
+
+        .step {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            color: var(--text-muted);
+        }
+
+        .step.active {
+            color: var(--text-main);
+            font-weight: 600;
+        }
+
+        .step-num {
+            width: 24px;
+            height: 24px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border: 1px solid var(--border-color);
+            font-size: 11px;
+            font-weight: 700;
+        }
+
+        .step.active .step-num {
+            background-color: var(--primary);
+            color: #ffffff;
+            border-color: var(--primary);
+        }
+
+        .step-label {
+            font-size: 11px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .step-line {
+            flex: 1;
+            height: 1px;
+            background-color: var(--border-color);
+            margin: 0 15px;
+        }
+    </style>
+</head>
+<body>
+
+<header>
+    <div class="logo" onclick="window.location.href='/'">Inglis Horizon</div>
+    <div>
+        <a href="/" class="back-btn">Retour</a>
+    </div>
+</header>
+
+<div class="container">
+    <div class="card">
+        <h2>Relier un nouveau compte</h2>
+        
+        <div class="wizard-steps">
+            <div class="step active" id="step-1-indicator">
+                <div class="step-num">1</div>
+                <div class="step-label">Identifiant</div>
+            </div>
+            <div class="step-line"></div>
+            <div class="step" id="step-2-indicator">
+                <div class="step-num">2</div>
+                <div class="step-label">Clé d'accès</div>
+            </div>
+            <div class="step-line"></div>
+            <div class="step" id="step-3-indicator">
+                <div class="step-num">3</div>
+                <div class="step-label">Confirmation</div>
+            </div>
+        </div>
+        
+        <p class="subtitle">Saisissez l'identifiant unique (UUID) du compte Inglis Horizon que vous souhaitez ajouter à votre espace client. Pour valider l'opération, vous devrez vous authentifier avec la clé d'accès biométrique associée à ce compte.</p>
+        
+        <div id="link-error-box" class="error-banner"></div>
+
+        <form id="link-form">
+            <div class="form-group">
+                <label for="account-id-input">ID du Compte Inglis Horizon (UUID)</label>
+                <input type="text" id="account-id-input" placeholder="ex: 12345678-abcd-ef01-2345-6789abcdef01" required>
+            </div>
+            <button type="submit" id="link-submit-btn" class="btn-link">
+                Lancer la liaison
+            </button>
+        </form>
+    </div>
+</div>
+
+<script>
+    // Link Account Flow
+    const linkForm = document.getElementById('link-form');
+    const linkError = document.getElementById('link-error-box');
+    const linkBtn = document.getElementById('link-submit-btn');
+
+    linkForm.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        linkError.style.display = 'none';
+        linkBtn.disabled = true;
+        const originalText = linkBtn.innerHTML;
+        linkBtn.innerHTML = '<div class="spinner"></div> Initialisation...';
+
+        // Update step UI to key validation
+        document.getElementById('step-1-indicator').classList.remove('active');
+        document.getElementById('step-2-indicator').classList.add('active');
+
+        const accountId = document.getElementById('account-id-input').value.trim();
+
+        try {
+            const res = await fetch('/api/link/begin', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ account_id: accountId })
+            });
+
+            if (!res.ok) {
+                const data = await res.json();
+                throw new Error(data.message || "Impossible d'initier la liaison.");
+            }
+
+            const data = await res.json();
+            // Redirect to passkey-service for verification
+            window.location.href = data.redirect_url;
+        } catch (err) {
+            linkError.textContent = err.message;
+            linkError.style.display = 'block';
+            linkBtn.innerHTML = originalText;
+            linkBtn.disabled = false;
+        }
+    });
+</script>
+</body>
+</html>
