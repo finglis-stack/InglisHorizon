@@ -274,16 +274,16 @@
         <div class="hero-logo">
             Inglis Horizon
         </div>
-        <h1 class="hero-title">Sécurité Biométrique</h1>
-        <p class="hero-subtitle">Associez une clé d'accès (Passkey) à votre compte pour autoriser et valider instantanément vos transactions.</p>
+        <h1 class="hero-title">Protection Simplifiée</h1>
+        <p class="hero-subtitle">Sécurisez l'accès à votre compte en y associant la biométrie de votre appareil. Vos validations se font désormais en un instant, en toute sérénité.</p>
     </div>
 
     <!-- Form Right Panel -->
     <div class="form-section">
         <!-- Main Linking View -->
         <div id="main-view" class="card">
-            <h2>Lier une Clé d'Accès</h2>
-            <p class="subtitle">Enregistrez l'authentification par empreinte digitale ou FaceID intégrée à cet appareil.</p>
+            <h2>Activer votre clé de sécurité</h2>
+            <p class="subtitle">Associez l'empreinte digitale ou la reconnaissance faciale de votre appareil (TouchID / FaceID) à votre compte. Vos données biométriques restent sur votre appareil et ne nous sont jamais transmises.</p>
 
             <div id="error-box" class="error-banner"></div>
 
@@ -294,7 +294,7 @@
             </div>
 
             <button id="register-btn" class="btn" disabled>
-                Associer mon Passkey
+                Activer ma clé de sécurité
             </button>
         </div>
 
@@ -305,8 +305,8 @@
                     <polyline points="20 6 9 17 4 12"></polyline>
                 </svg>
             </div>
-            <h2 style="color: var(--success);">Clé d'Accès Liée</h2>
-            <p class="subtitle" style="margin-bottom: 0;">Votre clé d'accès biométrique a été configurée et liée à votre compte avec succès. Vous pouvez à présent fermer cet onglet.</p>
+            <h2 style="color: var(--success);">Sécurisation Réussie</h2>
+            <p class="subtitle" style="margin-bottom: 0;">Votre clé de sécurité biométrique est maintenant configurée et liée à votre compte. Vous pouvez fermer cet onglet en toute sécurité.</p>
         </div>
     </div>
 </div>
@@ -382,7 +382,7 @@
         registerBtn.disabled = true;
         hideError();
         const originalText = registerBtn.innerHTML;
-        registerBtn.innerHTML = '<div class="spinner"></div> Authentification...';
+        registerBtn.innerHTML = '<div class="spinner"></div> Activation en cours...';
 
         try {
             // 1. Get Registration Options
