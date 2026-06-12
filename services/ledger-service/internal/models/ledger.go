@@ -10,11 +10,12 @@ import (
 )
 
 type Account struct {
-	ID       string  `json:"id"`
-	Currency string  `json:"currency"`
-	Type     string  `json:"account_type"`
-	Status   string  `json:"status"`
-	APR      float64 `json:"apr"`
+	ID          string  `json:"id"`
+	Currency    string  `json:"currency"`
+	Type        string  `json:"account_type"`
+	Status      string  `json:"status"`
+	APR         float64 `json:"apr"`
+	CreditLimit int64   `json:"credit_limit"`
 }
 
 type Transaction struct {
@@ -72,21 +73,28 @@ func InitDB(ctx context.Context, db *pgxpool.Pool) error {
 		log.Printf("Failed to add status column: %v", err)
 	}
 
+	// Migrate existing tables to add credit_limit if not exists
+	alterQueryLimit := `ALTER TABLE financial_accounts ADD COLUMN IF NOT EXISTS credit_limit BIGINT NOT NULL DEFAULT 0;`
+	_, err = db.Exec(ctx, alterQueryLimit)
+	if err != nil {
+		log.Printf("Failed to add credit_limit column: %v", err)
+	}
+
 	return err
 }
 
 // CreateAccount creates a new financial account.
-func CreateAccount(ctx context.Context, db *pgxpool.Pool, ownerID string, currency string, accType string, apr float64) (string, error) {
+func CreateAccount(ctx context.Context, db *pgxpool.Pool, ownerID string, currency string, accType string, apr float64, creditLimit int64) (string, error) {
 	var newID string
-	query := `INSERT INTO financial_accounts (owner_id, currency, account_type, interest_rate_apr) 
-			  VALUES ($1, $2, $3, $4) RETURNING id`
-	err := db.QueryRow(ctx, query, ownerID, currency, accType, apr).Scan(&newID)
+	query := `INSERT INTO financial_accounts (owner_id, currency, account_type, interest_rate_apr, credit_limit) 
+			  VALUES ($1, $2, $3, $4, $5) RETURNING id`
+	err := db.QueryRow(ctx, query, ownerID, currency, accType, apr, creditLimit).Scan(&newID)
 	return newID, err
 }
 
 // GetAccountsByOwner retrieves all financial accounts for a given client.
 func GetAccountsByOwner(ctx context.Context, db *pgxpool.Pool, ownerID string) ([]Account, error) {
-	query := `SELECT id, currency, account_type, status, interest_rate_apr FROM financial_accounts WHERE owner_id = $1 ORDER BY created_at DESC`
+	query := `SELECT id, currency, account_type, status, interest_rate_apr, credit_limit FROM financial_accounts WHERE owner_id = $1 ORDER BY created_at DESC`
 	rows, err := db.Query(ctx, query, ownerID)
 	if err != nil {
 		return nil, err
@@ -96,7 +104,7 @@ func GetAccountsByOwner(ctx context.Context, db *pgxpool.Pool, ownerID string) (
 	var accounts []Account
 	for rows.Next() {
 		var a Account
-		if err := rows.Scan(&a.ID, &a.Currency, &a.Type, &a.Status, &a.APR); err != nil {
+		if err := rows.Scan(&a.ID, &a.Currency, &a.Type, &a.Status, &a.APR, &a.CreditLimit); err != nil {
 			return nil, err
 		}
 		accounts = append(accounts, a)
@@ -173,7 +181,8 @@ func Transfer(ctx context.Context, db *pgxpool.Pool, fromAccountID, toAccountID 
 
 	// 0. Check if sender account is active and has sufficient balance for DEPOSIT accounts
 	var accType, accStatus string
-	err = tx.QueryRow(ctx, "SELECT account_type, status FROM financial_accounts WHERE id = $1 FOR UPDATE", fromAccountID).Scan(&accType, &accStatus)
+	var creditLimit int64
+	err = tx.QueryRow(ctx, "SELECT account_type, status, credit_limit FROM financial_accounts WHERE id = $1 FOR UPDATE", fromAccountID).Scan(&accType, &accStatus, &creditLimit)
 	if err != nil {
 		return fmt.Errorf("sender account not found")
 	}
@@ -196,6 +205,21 @@ func Transfer(ctx context.Context, db *pgxpool.Pool, fromAccountID, toAccountID 
 		}
 		if balance < amount {
 			return fmt.Errorf("insufficient funds")
+		}
+	} else if accType == "CREDIT" {
+		var balance int64
+		balQuery := `
+			SELECT 
+				COALESCE(SUM(CASE WHEN direction = 'CREDIT' THEN amount ELSE 0 END), 0) -
+				COALESCE(SUM(CASE WHEN direction = 'DEBIT' THEN amount ELSE 0 END), 0)
+			FROM entries WHERE account_id = $1
+		`
+		err = tx.QueryRow(ctx, balQuery, fromAccountID).Scan(&balance)
+		if err != nil {
+			return fmt.Errorf("failed to check balance")
+		}
+		if balance-amount < -creditLimit {
+			return fmt.Errorf("transaction rejects: credit limit exceeded")
 		}
 	}
 

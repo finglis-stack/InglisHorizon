@@ -687,7 +687,11 @@ func listFinancialAccounts(ownerID string) {
 		fmt.Printf("[%d] ID: %s | Type: %v | Devise: %v | Statut: %v\n", i+1, accID, acc["account_type"], acc["currency"], acc["status"])
 		fmt.Printf("    Solde actuel: %s\n", balanceStr)
 		if acc["account_type"] == "CREDIT" {
-			fmt.Printf("    Taux d'intérêt: %v%%\n", acc["apr"])
+			var limitVal float64
+			if lim, ok := acc["credit_limit"].(float64); ok {
+				limitVal = lim / 100.0
+			}
+			fmt.Printf("    Taux d'intérêt: %v%% | Limite de crédit: %.2f %s\n", acc["apr"], limitVal, acc["currency"])
 		}
 		fmt.Println("-----------------------------------------")
 	}
@@ -1038,6 +1042,7 @@ func createFinancialAccount(ownerID string) {
 		return
 	}
 
+	var creditLimit int64 = 0
 	if strings.HasPrefix(accType, "CREDIT") {
 		accType = "CREDIT"
 		var aprStr string
@@ -1045,6 +1050,14 @@ func createFinancialAccount(ownerID string) {
 			return
 		}
 		fmt.Sscanf(aprStr, "%f", &apr)
+
+		var limitStr string
+		if err := survey.AskOne(&survey.Input{Message: "Limite de crédit (en $, ex: 5000) :"}, &limitStr); err != nil {
+			return
+		}
+		var limitFloat float64
+		fmt.Sscanf(limitStr, "%f", &limitFloat)
+		creditLimit = int64(limitFloat * 100.0) // Convert to cents
 	} else {
 		accType = "DEPOSIT"
 	}
@@ -1054,6 +1067,7 @@ func createFinancialAccount(ownerID string) {
 		"currency":     currency,
 		"account_type": accType,
 		"apr":          apr,
+		"credit_limit": creditLimit,
 	}
 
 	jsonData, err := json.Marshal(payload)
@@ -1310,7 +1324,15 @@ func selectAccountInteractive(email string, promptMsg string) string {
 			}
 		}
 
-		opt := fmt.Sprintf("%s - %s (%s) | Solde: %s", acc["account_type"], acc["currency"], acc["status"], balanceStr)
+		var limitSuffix string
+		if acc["account_type"] == "CREDIT" {
+			var limitVal float64
+			if lim, ok := acc["credit_limit"].(float64); ok {
+				limitVal = lim / 100.0
+			}
+			limitSuffix = fmt.Sprintf(" | Limite: %.2f %s", limitVal, acc["currency"])
+		}
+		opt := fmt.Sprintf("%s - %s (%s) | Solde: %s%s", acc["account_type"], acc["currency"], acc["status"], balanceStr, limitSuffix)
 		options = append(options, opt)
 		accountIDs = append(accountIDs, accID)
 	}

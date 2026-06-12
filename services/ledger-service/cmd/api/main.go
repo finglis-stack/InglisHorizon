@@ -115,10 +115,11 @@ func main() {
 	// POST /ledger/accounts - Create financial account (MANAGER only)
 	mux.HandleFunc("POST /ledger/accounts", authMiddleware([]string{"MANAGER"}, func(w http.ResponseWriter, r *http.Request) {
 		var req struct {
-			OwnerID  string  `json:"owner_id"`
-			Currency string  `json:"currency"`
-			Type     string  `json:"account_type"`
-			APR      float64 `json:"apr"`
+			OwnerID     string  `json:"owner_id"`
+			Currency    string  `json:"currency"`
+			Type        string  `json:"account_type"`
+			APR         float64 `json:"apr"`
+			CreditLimit int64   `json:"credit_limit"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			http.Error(w, `{"message":"Bad request"}`, http.StatusBadRequest)
@@ -130,7 +131,7 @@ func main() {
 			return
 		}
 
-		id, err := models.CreateAccount(r.Context(), pool, req.OwnerID, req.Currency, req.Type, req.APR)
+		id, err := models.CreateAccount(r.Context(), pool, req.OwnerID, req.Currency, req.Type, req.APR, req.CreditLimit)
 		if err != nil {
 			log.Printf("ERROR: Failed to create account: %v", err)
 			http.Error(w, `{"message":"Internal Server Error"}`, http.StatusInternalServerError)

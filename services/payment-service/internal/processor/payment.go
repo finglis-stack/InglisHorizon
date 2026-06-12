@@ -138,24 +138,23 @@ func (p *PaymentProcessor) processPayment(req PaymentRequest) error {
 
 	// 2. Account Phase: Find the payer's account
 	var fromAccountID string
-	var status string
-	var accType string
-	var fromCurrency string
+	var accType, status, fromCurrency string
+	var creditLimit int64
 
 	if req.FromAccountID != "" {
 		fromAccountID = req.FromAccountID
-		err = tx.QueryRow(ctx, "SELECT account_type, status, currency FROM financial_accounts WHERE id = $1 AND owner_id = $2 FOR UPDATE", fromAccountID, ownerID).Scan(&accType, &status, &fromCurrency)
+		err = tx.QueryRow(ctx, "SELECT account_type, status, currency, credit_limit FROM financial_accounts WHERE id = $1 AND owner_id = $2 FOR UPDATE", fromAccountID, ownerID).Scan(&accType, &status, &fromCurrency, &creditLimit)
 		if err != nil || status == "CLOSED" {
 			return fmt.Errorf("provided sender account invalid or closed")
 		}
 	} else {
-		err = tx.QueryRow(ctx, "SELECT id, account_type, status, currency FROM financial_accounts WHERE owner_id = $1 AND account_type = 'DEPOSIT' AND status != 'CLOSED' LIMIT 1 FOR UPDATE", ownerID).Scan(&fromAccountID, &accType, &status, &fromCurrency)
+		err = tx.QueryRow(ctx, "SELECT id, account_type, status, currency, credit_limit FROM financial_accounts WHERE owner_id = $1 AND account_type = 'DEPOSIT' AND status != 'CLOSED' LIMIT 1 FOR UPDATE", ownerID).Scan(&fromAccountID, &accType, &status, &fromCurrency, &creditLimit)
 		if err != nil {
 			return fmt.Errorf("payer has no active DEPOSIT account in Ledger DB")
 		}
 	}
 
-	// Check Balance for DEPOSIT account (CREDIT accounts can be overdrawn up to a limit, but we'll assume no limit here or handled elsewhere)
+	// Check Balance / Credit Limits
 	if accType == "DEPOSIT" {
 		var balance int64
 		balQuery := `
@@ -170,6 +169,21 @@ func (p *PaymentProcessor) processPayment(req PaymentRequest) error {
 		}
 		if balance < req.Amount {
 			return fmt.Errorf("insufficient funds (balance: %d, requested: %d)", balance, req.Amount)
+		}
+	} else if accType == "CREDIT" {
+		var balance int64
+		balQuery := `
+			SELECT 
+				COALESCE(SUM(CASE WHEN direction = 'CREDIT' THEN amount ELSE 0 END), 0) -
+				COALESCE(SUM(CASE WHEN direction = 'DEBIT' THEN amount ELSE 0 END), 0)
+			FROM entries WHERE account_id = $1
+		`
+		err = tx.QueryRow(ctx, balQuery, fromAccountID).Scan(&balance)
+		if err != nil {
+			return fmt.Errorf("failed to check balance: %v", err)
+		}
+		if balance-req.Amount < -creditLimit {
+			return fmt.Errorf("credit limit exceeded (balance: %d, limit: %d, requested: %d)", balance, creditLimit, req.Amount)
 		}
 	}
 
