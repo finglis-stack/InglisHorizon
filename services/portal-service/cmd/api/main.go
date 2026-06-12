@@ -62,6 +62,12 @@ func main() {
 	staticDir := workDir + "/web/static"
 	log.Printf("Serving static portal files from: %s", staticDir)
 	
+	// Health Check
+	r.Get("/health", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("OK"))
+	})
+
 	// Server-level routing to serve pages
 	r.Get("/", func(w http.ResponseWriter, r *http.Request) {
 		http.ServeFile(w, r, staticDir+"/dashboard.html")
