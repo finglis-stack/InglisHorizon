@@ -147,6 +147,14 @@ func (a *AntifraudAnalyzer) checkVelocity(ctx context.Context, accountID string)
 }
 
 func (a *AntifraudAnalyzer) checkCircularFlow(ctx context.Context, fromAccountID, toAccountID string) error {
+	// If the accounts belong to the same owner, it is a transfer between own accounts and not circular money laundering
+	var fromOwner, toOwner string
+	err1 := a.LedgerDB.QueryRow(ctx, "SELECT owner_id FROM financial_accounts WHERE id = $1", fromAccountID).Scan(&fromOwner)
+	err2 := a.LedgerDB.QueryRow(ctx, "SELECT owner_id FROM financial_accounts WHERE id = $1", toAccountID).Scan(&toOwner)
+	if err1 == nil && err2 == nil && fromOwner == toOwner {
+		return nil
+	}
+
 	query := `
 		WITH RECURSIVE transfer_graph AS (
 			SELECT 
