@@ -92,6 +92,17 @@ func CreateAccount(ctx context.Context, db *pgxpool.Pool, ownerID string, curren
 	return newID, err
 }
 
+// GetAccount retrieves metadata for a single financial account.
+func GetAccount(ctx context.Context, db *pgxpool.Pool, accountID string) (*Account, error) {
+	var a Account
+	query := `SELECT id, currency, account_type, status, interest_rate_apr, credit_limit FROM financial_accounts WHERE id = $1`
+	err := db.QueryRow(ctx, query, accountID).Scan(&a.ID, &a.Currency, &a.Type, &a.Status, &a.APR, &a.CreditLimit)
+	if err != nil {
+		return nil, err
+	}
+	return &a, nil
+}
+
 // GetAccountsByOwner retrieves all financial accounts for a given client.
 func GetAccountsByOwner(ctx context.Context, db *pgxpool.Pool, ownerID string) ([]Account, error) {
 	query := `SELECT id, currency, account_type, status, interest_rate_apr, credit_limit FROM financial_accounts WHERE owner_id = $1 ORDER BY created_at DESC`

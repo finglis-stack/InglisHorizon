@@ -142,7 +142,7 @@ func main() {
 		json.NewEncoder(w).Encode(map[string]string{"id": id})
 	}))
 
-	// GET /ledger/accounts/{id} - Get account balance (authenticated)
+	// GET /ledger/accounts/{id} - Get account details and balance (authenticated)
 	mux.HandleFunc("GET /ledger/accounts/{id}", authMiddleware([]string{"MANAGER", "SUPPORT"}, func(w http.ResponseWriter, r *http.Request) {
 		accountID := r.PathValue("id")
 		if !isValidUUID(accountID) {
@@ -150,17 +150,30 @@ func main() {
 			return
 		}
 
+		acc, err := models.GetAccount(r.Context(), pool, accountID)
+		if err != nil {
+			log.Printf("ERROR: Failed to get account metadata for %s: %v", accountID, err)
+			http.Error(w, `{"message":"Account not found"}`, http.StatusNotFound)
+			return
+		}
+
 		balance, err := models.GetBalance(r.Context(), pool, accountID)
 		if err != nil {
 			log.Printf("ERROR: Failed to get balance for %s: %v", accountID, err)
-			http.Error(w, `{"message":"Account not found or error"}`, http.StatusNotFound)
+			http.Error(w, `{"message":"Internal Server Error"}`, http.StatusInternalServerError)
 			return
 		}
 
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]interface{}{
-			"account_id": accountID,
-			"balance":    balance,
+			"id":           acc.ID,
+			"currency":     acc.Currency,
+			"account_type": acc.Type,
+			"status":       acc.Status,
+			"apr":          acc.APR,
+			"credit_limit": acc.CreditLimit,
+			"balance":      balance,
+			"account_id":   acc.ID,
 		})
 	}))
 
