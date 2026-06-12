@@ -3,6 +3,8 @@ package analyzer
 import (
 	"context"
 	"fmt"
+	"net"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -194,21 +196,38 @@ func (a *AntifraudAnalyzer) checkImpossibleTravel(ctx context.Context, req Analy
 	if req.ClientIP == "" || req.PayerEmail == "" {
 		return nil
 	}
+
+	clientIP := cleanIP(req.ClientIP)
+
 	query := `
 		SELECT ip_address 
 		FROM user_ips 
 		WHERE email = $1 AND created_at > NOW() - INTERVAL '5 minutes'
 		ORDER BY created_at DESC LIMIT 1
 	`
-	var lastIP string
-	err := a.AccountDB.QueryRow(ctx, query, req.PayerEmail).Scan(&lastIP)
+	var lastIPRaw string
+	err := a.AccountDB.QueryRow(ctx, query, req.PayerEmail).Scan(&lastIPRaw)
 	
-	_, _ = a.AccountDB.Exec(ctx, "INSERT INTO user_ips (email, ip_address) VALUES ($1, $2)", req.PayerEmail, req.ClientIP)
+	_, _ = a.AccountDB.Exec(ctx, "INSERT INTO user_ips (email, ip_address) VALUES ($1, $2)", req.PayerEmail, clientIP)
 
-	if err == nil && lastIP != "" && lastIP != req.ClientIP {
-		return fmt.Errorf("ANTIFRAUD L3: Impossible Travel / IP Abnormality detected (IP changed from %s to %s in <5m)", lastIP, req.ClientIP)
+	if err == nil && lastIPRaw != "" {
+		lastIP := cleanIP(lastIPRaw)
+		if lastIP != clientIP {
+			return fmt.Errorf("ANTIFRAUD L3: Impossible Travel / IP Abnormality detected (IP changed from %s to %s in <5m)", lastIP, clientIP)
+		}
 	}
 	return nil
+}
+
+func cleanIP(ipStr string) string {
+	if commaIdx := strings.Index(ipStr, ","); commaIdx != -1 {
+		ipStr = strings.TrimSpace(ipStr[:commaIdx])
+	}
+	host, _, err := net.SplitHostPort(ipStr)
+	if err == nil {
+		return host
+	}
+	return ipStr
 }
 
 func (a *AntifraudAnalyzer) checkBenfordsLaw(ctx context.Context, accountID string) error {
