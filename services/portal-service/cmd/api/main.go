@@ -706,6 +706,11 @@ func transferFundsHandler(w http.ResponseWriter, r *http.Request) {
 	// Generate UUID version 4 for idempotency key
 	idempotencyKey := generateUUID()
 
+	clientIP := r.Header.Get("X-Forwarded-For")
+	if clientIP == "" {
+		clientIP = r.RemoteAddr
+	}
+
 	payload := map[string]interface{}{
 		"payer_email":     payerEmail,
 		"from_account_id": req.FromAccountID,
@@ -713,6 +718,7 @@ func transferFundsHandler(w http.ResponseWriter, r *http.Request) {
 		"amount":          req.AmountCents,
 		"idempotency_key": idempotencyKey,
 		"type":            "PAYMENT",
+		"client_ip":       clientIP,
 	}
 
 	jsonPayload, err := json.Marshal(payload)

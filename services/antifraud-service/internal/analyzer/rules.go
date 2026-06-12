@@ -198,6 +198,9 @@ func (a *AntifraudAnalyzer) checkImpossibleTravel(ctx context.Context, req Analy
 	}
 
 	clientIP := cleanIP(req.ClientIP)
+	if isPrivateIP(clientIP) {
+		return nil
+	}
 
 	query := `
 		SELECT ip_address 
@@ -228,6 +231,14 @@ func cleanIP(ipStr string) string {
 		return host
 	}
 	return ipStr
+}
+
+func isPrivateIP(ipStr string) bool {
+	ip := net.ParseIP(ipStr)
+	if ip == nil {
+		return false
+	}
+	return ip.IsLoopback() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsPrivate()
 }
 
 func (a *AntifraudAnalyzer) checkBenfordsLaw(ctx context.Context, accountID string) error {
