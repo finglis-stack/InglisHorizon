@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Espace Client - Inglis Horizon</title>
+    <title>Détails du Compte - Inglis Horizon</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
@@ -48,6 +48,7 @@
             font-weight: 700;
             text-transform: uppercase;
             letter-spacing: -0.5px;
+            cursor: pointer;
         }
 
         .user-menu {
@@ -57,7 +58,7 @@
             font-size: 14px;
         }
 
-        .logout-btn {
+        .back-btn {
             background: none;
             border: 1px solid var(--border-color);
             padding: 8px 16px;
@@ -67,9 +68,12 @@
             text-transform: uppercase;
             letter-spacing: 0.5px;
             transition: all 0.2s ease;
+            text-decoration: none;
+            color: var(--text-main);
+            display: inline-block;
         }
 
-        .logout-btn:hover {
+        .back-btn:hover {
             background-color: #f3f4f6;
             border-color: var(--text-main);
         }
@@ -105,36 +109,32 @@
             margin-bottom: 30px;
         }
 
-        .account-item {
-            border: 1px solid var(--border-color);
-            padding: 24px;
-            margin-bottom: 16px;
+        .account-header-box {
             display: flex;
             justify-content: space-between;
-            align-items: center;
-            transition: border-color 0.2s ease;
+            align-items: flex-start;
+            border-bottom: 1px solid var(--border-color);
+            padding-bottom: 24px;
+            margin-bottom: 24px;
         }
 
-        .account-item:hover {
-            border-color: var(--text-main);
-        }
-
-        .account-info {
+        .account-meta-info {
             display: flex;
             flex-direction: column;
-            gap: 6px;
+            gap: 8px;
         }
 
         .account-id {
             font-family: monospace;
             font-weight: 600;
-            font-size: 14px;
+            font-size: 16px;
+            color: var(--text-main);
         }
 
-        .account-meta {
+        .badges-row {
             display: flex;
-            gap: 10px;
-            align-items: center;
+            gap: 8px;
+            flex-wrap: wrap;
         }
 
         .badge {
@@ -156,48 +156,28 @@
             color: #059669;
         }
 
-        .account-balance {
+        .account-large-balance {
             text-align: right;
-            display: flex;
-            flex-direction: column;
-            gap: 6px;
         }
 
-        .balance-amount {
-            font-size: 20px;
-            font-weight: 700;
-            letter-spacing: -0.5px;
-        }
-
-        .limit-amount {
+        .balance-label {
             font-size: 11px;
             color: var(--text-muted);
-        }
-
-        .btn-view-tx {
-            background: none;
-            border: 1px solid var(--text-main);
-            color: var(--text-main);
-            padding: 6px 12px;
-            font-size: 11px;
-            font-weight: 600;
             text-transform: uppercase;
-            cursor: pointer;
-            margin-top: 10px;
-            align-self: flex-start;
-            transition: all 0.2s ease;
+            letter-spacing: 1px;
+            margin-bottom: 4px;
         }
 
-        .btn-view-tx:hover {
-            background-color: var(--primary);
-            color: #ffffff;
+        .balance-value {
+            font-size: 32px;
+            font-weight: 700;
+            letter-spacing: -1px;
         }
 
-        .empty-state {
-            text-align: center;
-            padding: 40px 0;
+        .credit-limit-info {
+            font-size: 12px;
             color: var(--text-muted);
-            font-size: 14px;
+            margin-top: 4px;
         }
 
         /* Form styling */
@@ -232,7 +212,7 @@
             background-color: #ffffff;
         }
 
-        .btn-link {
+        .btn-action {
             width: 100%;
             background-color: var(--primary);
             color: #ffffff;
@@ -250,8 +230,13 @@
             gap: 10px;
         }
 
-        .btn-link:hover {
+        .btn-action:hover {
             background-color: var(--primary-hover);
+        }
+
+        .btn-action:disabled {
+            background-color: var(--text-muted);
+            cursor: not-allowed;
         }
 
         .error-banner {
@@ -320,6 +305,13 @@
             font-weight: 500;
         }
 
+        .empty-state {
+            text-align: center;
+            padding: 40px 0;
+            color: var(--text-muted);
+            font-size: 14px;
+        }
+
         .spinner {
             width: 20px;
             height: 20px;
@@ -337,61 +329,73 @@
 <body>
 
 <header>
-    <div class="logo">Inglis Horizon</div>
+    <div class="logo" onclick="window.location.href='/'">Inglis Horizon</div>
     <div class="user-menu">
-        <span id="user-display">Chargement...</span>
-        <button id="logout-btn" class="logout-btn">Se déconnecter</button>
+        <a href="/" class="back-btn">Retour au tableau de bord</a>
     </div>
 </header>
 
 <div class="container">
-    <!-- Left Column: Linked Accounts -->
+    <!-- Left Column: Details & Transactions -->
     <div>
-        <div id="status-banner-error" class="error-banner"></div>
-        <div id="status-banner-success" class="success-banner"></div>
-
-        <div class="card">
-            <h2>Mes comptes reliés</h2>
-            <div id="accounts-list">
-                <div class="empty-state">Chargement de vos comptes...</div>
+        <div id="account-card" class="card">
+            <div class="account-header-box">
+                <div class="account-meta-info">
+                    <span id="account-id-display" class="account-id">Chargement...</span>
+                    <div class="badges-row">
+                        <span id="badge-type" class="badge">Type</span>
+                        <span id="badge-status" class="badge">Statut</span>
+                        <span id="badge-apr" class="badge">APR</span>
+                    </div>
+                </div>
+                <div class="account-large-balance">
+                    <div class="balance-label">Solde disponible</div>
+                    <div id="balance-display" class="balance-value">0.00 $</div>
+                    <div id="credit-limit-display" class="credit-limit-info"></div>
+                </div>
             </div>
-        </div>
 
-        <div id="transactions-card" class="card" style="display: none;">
-            <h2 id="transactions-title">Transactions Récentes</h2>
+            <h2>Historique des transactions</h2>
             <div class="tx-container">
                 <table class="tx-table">
                     <thead>
                         <tr>
                             <th>Date</th>
                             <th>Description</th>
-                            <th>Type</th>
+                            <th>Direction</th>
                             <th>Montant</th>
                         </tr>
                     </thead>
                     <tbody id="transactions-list">
-                        <!-- Transactions will load here -->
+                        <tr><td colspan="4" class="empty-state">Chargement de l'historique...</td></tr>
                     </tbody>
                 </table>
             </div>
         </div>
     </div>
 
-    <!-- Right Column: Add/Link Account -->
+    <!-- Right Column: Transfer Funds -->
     <div>
         <div class="card">
-            <h2>Relier un compte</h2>
-            <p class="subtitle" style="margin-bottom: 20px; font-size: 13px;">Reliez votre compte bancaire Inglis Horizon. Pour des raisons de sécurité, vous devrez valider la liaison avec la clé d'accès biométrique associée à ce compte.</p>
-            
-            <div id="link-error-box" class="error-banner"></div>
+            <h2>Transférer des fonds</h2>
+            <p style="margin-bottom: 20px; font-size: 13px; color: var(--text-muted); line-height: 1.4;">
+                Effectuez un transfert instantané vers un autre compte Inglis Horizon. Les transactions transitent par le système de compensation de la banque.
+            </p>
 
-            <form id="link-form">
+            <div id="transfer-error" class="error-banner"></div>
+            <div id="transfer-success" class="success-banner"></div>
+
+            <form id="transfer-form">
                 <div class="form-group">
-                    <label for="account-id-input">ID du Compte Bancaire (UUID)</label>
-                    <input type="text" id="account-id-input" placeholder="ex: 12345678-abcd-ef01-2345-6789abcdef01" required>
+                    <label for="to-account-input">ID du compte bénéficiaire</label>
+                    <input type="text" id="to-account-input" placeholder="ex: 12345678-abcd-ef01-2345-6789abcdef01" required>
                 </div>
-                <button type="submit" id="link-submit-btn" class="btn-link">
-                    Lancer la liaison
+                <div class="form-group">
+                    <label for="amount-input">Montant à transférer</label>
+                    <input type="number" id="amount-input" step="0.01" min="0.01" placeholder="0.00" required>
+                </div>
+                <button type="submit" id="transfer-btn" class="btn-action">
+                    Valider le transfert
                 </button>
             </form>
         </div>
@@ -399,46 +403,26 @@
 </div>
 
 <script>
-    // URL Banner Status Handling
     const urlParams = new URLSearchParams(window.location.search);
-    const status = urlParams.get('status');
-    const error = urlParams.get('error');
+    const accountId = urlParams.get('id');
 
-    if (status === 'success') {
-        const succ = document.getElementById('status-banner-success');
-        succ.textContent = "Le compte bancaire a été relié avec succès !";
-        succ.style.display = 'block';
-    } else if (error) {
-        const err = document.getElementById('status-banner-error');
-        if (error === 'verification_failed') {
-            err.textContent = "Échec de la validation de la clé d'accès biométrique.";
-        } else if (error === 'session_expired') {
-            err.textContent = "La session de liaison a expiré. Veuillez réessayer.";
-        } else {
-            err.textContent = "Une erreur est survenue lors de la liaison du compte.";
-        }
-        err.style.display = 'block';
+    if (!accountId) {
+        window.location.href = '/';
     }
 
-    // Verify Session
+    // Verify Session & Load Details
     fetch('/api/me')
         .then(res => {
             if (!res.ok) throw new Error();
             return res.json();
         })
         .then(data => {
-            document.getElementById('user-display').textContent = data.username;
-            loadAccounts();
+            loadAccountDetails();
+            loadTransactions();
         })
         .catch(() => {
             window.location.href = '/login';
         });
-
-    // Logout Action
-    document.getElementById('logout-btn').addEventListener('click', () => {
-        fetch('/api/logout', { method: 'POST' })
-            .then(() => window.location.href = '/login');
-    });
 
     // Helper: format money
     function formatMoney(amountCents, currency) {
@@ -449,110 +433,52 @@
         return `${amount} ${currency}`;
     }
 
-    // Load Accounts
-    function loadAccounts() {
-        const listContainer = document.getElementById('accounts-list');
-        fetch('/api/accounts')
-            .then(res => res.json())
-            .then(accounts => {
-                if (accounts.length === 0) {
-                    listContainer.innerHTML = '<div class="empty-state">Aucun compte bancaire relié. Utilisez le panneau de droite pour en ajouter un.</div>';
-                    return;
+    let accountCurrency = 'CAD';
+
+    // Fetch Details
+    function loadAccountDetails() {
+        fetch(`/api/accounts/${accountId}`)
+            .then(res => {
+                if (!res.ok) throw new Error("Impossible de charger les détails du compte.");
+                return res.json();
+            })
+            .then(acc => {
+                accountCurrency = acc.currency;
+                document.getElementById('account-id-display').textContent = acc.id;
+                
+                const typeBadge = document.getElementById('badge-type');
+                typeBadge.textContent = acc.account_type;
+                typeBadge.className = `badge ${acc.account_type === 'CREDIT' ? 'credit' : 'deposit'}`;
+
+                document.getElementById('badge-status').textContent = acc.status;
+                document.getElementById('badge-apr').textContent = `APR: ${acc.apr}%`;
+                document.getElementById('balance-display').textContent = formatMoney(acc.balance, acc.currency);
+
+                const limitDisplay = document.getElementById('credit-limit-display');
+                if (acc.account_type === 'CREDIT') {
+                    limitDisplay.textContent = `Limite de crédit: ${formatMoney(acc.credit_limit, acc.currency)}`;
+                } else {
+                    limitDisplay.textContent = '';
                 }
-
-                listContainer.innerHTML = '';
-                accounts.forEach(acc => {
-                    const isCredit = acc.account_type === 'CREDIT';
-                    
-                    const item = document.createElement('div');
-                    item.className = 'account-item';
-                    
-                    let limitHtml = '';
-                    if (isCredit) {
-                        limitHtml = `<div class="limit-amount">Limite: ${formatMoney(acc.credit_limit, acc.currency)}</div>`;
-                    }
-
-                    item.innerHTML = `
-                        <div class="account-info">
-                            <span class="account-id">${acc.id}</span>
-                            <div class="account-meta">
-                                <span class="badge ${isCredit ? 'credit' : 'deposit'}">${acc.account_type}</span>
-                                <span class="badge">${acc.status}</span>
-                                <span class="badge">APR: ${acc.apr}%</span>
-                            </div>
-                            <button class="btn-view-tx" onclick="window.location.href='/account?id=' + acc.id">Détails & Transfert</button>
-                        </div>
-                        <div class="account-balance">
-                            <span class="balance-amount">${formatMoney(acc.balance, acc.currency)}</span>
-                            ${limitHtml}
-                        </div>
-                    `;
-                    listContainer.appendChild(item);
-                });
             })
             .catch(err => {
-                listContainer.innerHTML = '<div class="empty-state" style="color: var(--error)">Erreur lors du chargement des comptes.</div>';
+                document.getElementById('account-id-display').textContent = "Erreur de chargement";
+                document.getElementById('account-id-display').style.color = "var(--error)";
             });
     }
 
-    // Link Account Flow
-    const linkForm = document.getElementById('link-form');
-    const linkError = document.getElementById('link-error-box');
-    const linkBtn = document.getElementById('link-submit-btn');
-
-    linkForm.addEventListener('submit', async (e) => {
-        e.preventDefault();
-        linkError.style.display = 'none';
-        linkBtn.disabled = true;
-        const originalText = linkBtn.innerHTML;
-        linkBtn.innerHTML = '<div class="spinner"></div> Initialisation...';
-
-        const accountId = document.getElementById('account-id-input').value.trim();
-
-        try {
-            const res = await fetch('/api/link/begin', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ account_id: accountId })
-            });
-
-            if (!res.ok) {
-                const data = await res.json();
-                throw new Error(data.message || "Impossible d'initier la liaison.");
-            }
-
-            const data = await res.json();
-            // Redirect to passkey-service for verification
-            window.location.href = data.redirect_url;
-        } catch (err) {
-            linkError.textContent = err.message;
-            linkError.style.display = 'block';
-            linkBtn.innerHTML = originalText;
-            linkBtn.disabled = false;
-        }
-    });
-
-    // View Transactions
-    function viewTransactions(accountId) {
-        const txCard = document.getElementById('transactions-card');
-        const txTitle = document.getElementById('transactions-title');
+    // Fetch Transactions
+    function loadTransactions() {
         const txList = document.getElementById('transactions-list');
-
-        txTitle.textContent = `Transactions du compte ${accountId.substring(0, 8)}`;
-        txList.innerHTML = '<tr><td colspan="4" class="empty-state">Chargement des transactions...</td></tr>';
-        txCard.style.display = 'block';
-        txCard.scrollIntoView({ behavior: 'smooth' });
-
-        fetch(`/api/me`) // just check auth
-            .then(() => fetch(`/api/accounts/${accountId}/transactions`))
+        fetch(`/api/accounts/${accountId}/transactions`)
             .then(res => {
-                if (!res.ok) throw new Error("Impossible de charger l'historique.");
+                if (!res.ok) throw new Error();
                 return res.json();
             })
             .then(data => {
                 const txs = data.transactions;
                 if (!txs || txs.length === 0) {
-                    txList.innerHTML = '<tr><td colspan="4" class="empty-state">Aucune transaction trouvée pour ce compte.</td></tr>';
+                    txList.innerHTML = '<tr><td colspan="4" class="empty-state">Aucune transaction récente.</td></tr>';
                     return;
                 }
 
@@ -571,15 +497,77 @@
                         <td>${date}</td>
                         <td class="tx-type">${tx.type}</td>
                         <td><span class="badge">${tx.direction}</span></td>
-                        <td><span class="${amountClass}">${prefix} ${(tx.amount / 100).toFixed(2)}</span></td>
+                        <td><span class="${amountClass}">${prefix} ${formatMoney(tx.amount, accountCurrency)}</span></td>
                     `;
                     txList.appendChild(row);
                 });
             })
-            .catch(err => {
-                txList.innerHTML = `<tr><td colspan="4" class="empty-state" style="color: var(--error)">${err.message}</td></tr>`;
+            .catch(() => {
+                txList.innerHTML = '<tr><td colspan="4" class="empty-state" style="color: var(--error)">Impossible de charger les transactions.</td></tr>';
             });
     }
+
+    // Transfer Submit Action
+    const transferForm = document.getElementById('transfer-form');
+    const transferError = document.getElementById('transfer-error');
+    const transferSuccess = document.getElementById('transfer-success');
+    const transferBtn = document.getElementById('transfer-btn');
+
+    transferForm.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        transferError.style.display = 'none';
+        transferSuccess.style.display = 'none';
+        
+        const toAccountId = document.getElementById('to-account-input').value.trim();
+        const amountFloat = parseFloat(document.getElementById('amount-input').value);
+
+        if (isNaN(amountFloat) || amountFloat <= 0) {
+            transferError.textContent = "Veuillez entrer un montant valide.";
+            transferError.style.display = 'block';
+            return;
+        }
+
+        const amountCents = Math.round(amountFloat * 100);
+
+        transferBtn.disabled = true;
+        const originalText = transferBtn.innerHTML;
+        transferBtn.innerHTML = '<div class="spinner"></div> Traitement du paiement...';
+
+        try {
+            const res = await fetch('/api/transfer', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    from_account_id: accountId,
+                    to_account_id: toAccountId,
+                    amount_cents: amountCents
+                })
+            });
+
+            const data = await res.json();
+
+            if (!res.ok) {
+                throw new Error(data.message || "Le transfert a été rejeté par la banque.");
+            }
+
+            transferSuccess.textContent = "Le transfert a été initié et est en cours de traitement.";
+            transferSuccess.style.display = 'block';
+            transferForm.reset();
+
+            // Refresh account data and transaction log after a short delay
+            setTimeout(() => {
+                loadAccountDetails();
+                loadTransactions();
+            }, 2000);
+
+        } catch (err) {
+            transferError.textContent = err.message;
+            transferError.style.display = 'block';
+        } finally {
+            transferBtn.innerHTML = originalText;
+            transferBtn.disabled = false;
+        }
+    });
 </script>
 </body>
 </html>

@@ -11,6 +11,7 @@ import (
 
 type Account struct {
 	ID          string  `json:"id"`
+	OwnerID     string  `json:"owner_id"`
 	Currency    string  `json:"currency"`
 	Type        string  `json:"account_type"`
 	Status      string  `json:"status"`
@@ -95,8 +96,8 @@ func CreateAccount(ctx context.Context, db *pgxpool.Pool, ownerID string, curren
 // GetAccount retrieves metadata for a single financial account.
 func GetAccount(ctx context.Context, db *pgxpool.Pool, accountID string) (*Account, error) {
 	var a Account
-	query := `SELECT id, currency, account_type, status, interest_rate_apr, credit_limit FROM financial_accounts WHERE id = $1`
-	err := db.QueryRow(ctx, query, accountID).Scan(&a.ID, &a.Currency, &a.Type, &a.Status, &a.APR, &a.CreditLimit)
+	query := `SELECT id, owner_id, currency, account_type, status, interest_rate_apr, credit_limit FROM financial_accounts WHERE id = $1`
+	err := db.QueryRow(ctx, query, accountID).Scan(&a.ID, &a.OwnerID, &a.Currency, &a.Type, &a.Status, &a.APR, &a.CreditLimit)
 	if err != nil {
 		return nil, err
 	}
@@ -105,7 +106,7 @@ func GetAccount(ctx context.Context, db *pgxpool.Pool, accountID string) (*Accou
 
 // GetAccountsByOwner retrieves all financial accounts for a given client.
 func GetAccountsByOwner(ctx context.Context, db *pgxpool.Pool, ownerID string) ([]Account, error) {
-	query := `SELECT id, currency, account_type, status, interest_rate_apr, credit_limit FROM financial_accounts WHERE owner_id = $1 ORDER BY created_at DESC`
+	query := `SELECT id, owner_id, currency, account_type, status, interest_rate_apr, credit_limit FROM financial_accounts WHERE owner_id = $1 ORDER BY created_at DESC`
 	rows, err := db.Query(ctx, query, ownerID)
 	if err != nil {
 		return nil, err
@@ -115,7 +116,7 @@ func GetAccountsByOwner(ctx context.Context, db *pgxpool.Pool, ownerID string) (
 	var accounts []Account
 	for rows.Next() {
 		var a Account
-		if err := rows.Scan(&a.ID, &a.Currency, &a.Type, &a.Status, &a.APR, &a.CreditLimit); err != nil {
+		if err := rows.Scan(&a.ID, &a.OwnerID, &a.Currency, &a.Type, &a.Status, &a.APR, &a.CreditLimit); err != nil {
 			return nil, err
 		}
 		accounts = append(accounts, a)

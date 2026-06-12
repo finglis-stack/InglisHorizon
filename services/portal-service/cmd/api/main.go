@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -14,14 +15,16 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/golang-jwt/jwt/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"golang.org/x/crypto/bcrypt"
 
 	"portal-service/internal/db"
 )
 
 var (
-	database     *db.DB
-	jwtSecretKey []byte
+	database       *db.DB
+	jwtSecretKey   []byte
+	accountDBPool  *pgxpool.Pool
 )
 
 type PortalClaims struct {
@@ -49,6 +52,19 @@ func main() {
 		log.Fatalf("Failed to connect to Portal Database: %v", err)
 	}
 	defer database.Close()
+
+	accountDBURL := os.Getenv("ACCOUNT_DB_URL")
+	if accountDBURL != "" {
+		accountDBPool, err = pgxpool.New(context.Background(), accountDBURL)
+		if err != nil {
+			log.Printf("WARNING: Failed to connect to Account Database: %v", err)
+		} else {
+			defer accountDBPool.Close()
+			log.Println("Connected to Account Database successfully")
+		}
+	} else {
+		log.Println("WARNING: ACCOUNT_DB_URL is not set")
+	}
 
 	r := chi.NewRouter()
 
@@ -78,6 +94,9 @@ func main() {
 	r.Get("/register", func(w http.ResponseWriter, r *http.Request) {
 		http.ServeFile(w, r, staticDir+"/register.html")
 	})
+	r.Get("/account", func(w http.ResponseWriter, r *http.Request) {
+		http.ServeFile(w, r, staticDir+"/account.html")
+	})
 	
 	// Helper to serve CSS/images or JS assets if needed
 	fileServer(r, "/assets", http.Dir(staticDir))
@@ -92,7 +111,9 @@ func main() {
 		r.Use(portalAuthMiddleware)
 		r.Get("/api/me", meHandler)
 		r.Get("/api/accounts", listLinkedAccountsHandler)
+		r.Get("/api/accounts/{id}", getAccountDetailsHandler)
 		r.Get("/api/accounts/{id}/transactions", getAccountTransactionsHandler)
+		r.Post("/api/transfer", transferFundsHandler)
 		r.Post("/api/link/begin", beginLinkHandler)
 		r.Get("/api/link/callback", linkCallbackHandler)
 	})
@@ -552,4 +573,201 @@ func verifyLinkWebhookHandler(w http.ResponseWriter, r *http.Request) {
 	log.Printf("AUDIT: Webhook marked portal link session %s as verified", req.PortalSessionID)
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte(`{"status":"verified"}`))
+}
+
+// Handler: GET /api/accounts/{id}
+func getAccountDetailsHandler(w http.ResponseWriter, r *http.Request) {
+	accountID := chi.URLParam(r, "id")
+	userID := r.Context().Value("user_id").(string)
+
+	// Verify the user actually owns this link
+	var exists bool
+	err := database.Pool.QueryRow(r.Context(), "SELECT EXISTS(SELECT 1 FROM user_linked_accounts WHERE user_id = $1 AND account_id = $2)", userID, accountID).Scan(&exists)
+	if err != nil || !exists {
+		http.Error(w, `{"message":"Forbidden: Account not linked to this profile"}`, http.StatusForbidden)
+		return
+	}
+
+	type LedgerAccount struct {
+		ID          string  `json:"id"`
+		Currency    string  `json:"currency"`
+		Type        string  `json:"account_type"`
+		Status      string  `json:"status"`
+		APR         float64 `json:"apr"`
+		CreditLimit int64   `json:"credit_limit"`
+		OwnerID     string  `json:"owner_id"`
+	}
+
+	type AccountWithBalance struct {
+		LedgerAccount
+		Balance int64 `json:"balance"`
+	}
+
+	// 1. Fetch details from ledger-service
+	var details LedgerAccount
+	err = fetchLedgerData(r.Context(), "/ledger/accounts/"+accountID, &details)
+	if err != nil {
+		log.Printf("ERROR: Failed to fetch details for account %s: %v", accountID, err)
+		http.Error(w, `{"message":"Failed to fetch account metadata"}`, http.StatusInternalServerError)
+		return
+	}
+
+	// 2. Fetch balance
+	var balResponse struct {
+		Balance int64 `json:"balance"`
+	}
+	err = fetchLedgerData(r.Context(), "/ledger/accounts/"+accountID, &balResponse)
+	if err != nil {
+		log.Printf("ERROR: Failed to fetch balance for account %s: %v", accountID, err)
+		http.Error(w, `{"message":"Failed to fetch account balance"}`, http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(AccountWithBalance{
+		LedgerAccount: details,
+		Balance:       balResponse.Balance,
+	})
+}
+
+// Handler: POST /api/transfer
+func transferFundsHandler(w http.ResponseWriter, r *http.Request) {
+	userID := r.Context().Value("user_id").(string)
+
+	var req struct {
+		FromAccountID string `json:"from_account_id"`
+		ToAccountID   string `json:"to_account_id"`
+		AmountCents   int64  `json:"amount_cents"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, `{"message":"Bad request"}`, http.StatusBadRequest)
+		return
+	}
+
+	if req.FromAccountID == "" || req.ToAccountID == "" || req.AmountCents <= 0 {
+		http.Error(w, `{"message":"Invalid parameters"}`, http.StatusBadRequest)
+		return
+	}
+
+	// 1. Verify the user actually owns/linked from_account_id
+	var exists bool
+	err := database.Pool.QueryRow(r.Context(), "SELECT EXISTS(SELECT 1 FROM user_linked_accounts WHERE user_id = $1 AND account_id = $2)", userID, req.FromAccountID).Scan(&exists)
+	if err != nil || !exists {
+		http.Error(w, `{"message":"Forbidden: Source account not linked to this profile"}`, http.StatusForbidden)
+		return
+	}
+
+	// 2. Fetch source account details from ledger-service to get owner_id
+	type LedgerAccount struct {
+		ID          string  `json:"id"`
+		Currency    string  `json:"currency"`
+		Type        string  `json:"account_type"`
+		Status      string  `json:"status"`
+		APR         float64 `json:"apr"`
+		CreditLimit int64   `json:"credit_limit"`
+		OwnerID     string  `json:"owner_id"`
+	}
+	var details LedgerAccount
+	err = fetchLedgerData(r.Context(), "/ledger/accounts/"+req.FromAccountID, &details)
+	if err != nil {
+		log.Printf("ERROR: Failed to fetch source account details: %v", err)
+		http.Error(w, `{"message":"Failed to fetch source account details"}`, http.StatusInternalServerError)
+		return
+	}
+
+	if details.OwnerID == "" {
+		log.Printf("ERROR: OwnerID is empty for account %s", req.FromAccountID)
+		http.Error(w, `{"message":"Failed to identify account owner"}`, http.StatusInternalServerError)
+		return
+	}
+
+	// 3. Look up owner email from secure_accounts in the account-service DB
+	if accountDBPool == nil {
+		log.Printf("ERROR: accountDBPool is not initialized")
+		http.Error(w, `{"message":"Account service database unavailable"}`, http.StatusInternalServerError)
+		return
+	}
+
+	var payerEmail string
+	err = accountDBPool.QueryRow(r.Context(), "SELECT email FROM secure_accounts WHERE id = $1", details.OwnerID).Scan(&payerEmail)
+	if err != nil {
+		log.Printf("ERROR: Failed to query email for owner %s: %v", details.OwnerID, err)
+		http.Error(w, `{"message":"Account owner not found in banking directory"}`, http.StatusNotFound)
+		return
+	}
+
+	// 4. Send request to payment-service POST /payments/init
+	paymentURL := os.Getenv("PAYMENT_SERVICE_URL")
+	if paymentURL == "" {
+		paymentURL = "http://payment-service.railway.internal:8080"
+	}
+
+	// Generate UUID version 4 for idempotency key
+	idempotencyKey := generateUUID()
+
+	payload := map[string]interface{}{
+		"payer_email":     payerEmail,
+		"from_account_id": req.FromAccountID,
+		"to_account_id":   req.ToAccountID,
+		"amount":          req.AmountCents,
+		"idempotency_key": idempotencyKey,
+		"type":            "PAYMENT",
+	}
+
+	jsonPayload, err := json.Marshal(payload)
+	if err != nil {
+		http.Error(w, `{"message":"Failed to marshal payment request"}`, http.StatusInternalServerError)
+		return
+	}
+
+	client := &http.Client{Timeout: 10 * time.Second}
+	reqInit, err := http.NewRequestWithContext(r.Context(), "POST", paymentURL+"/payments/init", strings.NewReader(string(jsonPayload)))
+	if err != nil {
+		http.Error(w, `{"message":"Failed to create payment service request"}`, http.StatusInternalServerError)
+		return
+	}
+	reqInit.Header.Set("Content-Type", "application/json")
+
+	resp, err := client.Do(reqInit)
+	if err != nil {
+		log.Printf("ERROR: Payment service call failed: %v", err)
+		http.Error(w, `{"message":"Failed to contact payment clearing house"}`, http.StatusServiceUnavailable)
+		return
+	}
+	defer resp.Body.Close()
+
+	bodyBytes, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusAccepted && resp.StatusCode != http.StatusOK {
+		log.Printf("ERROR: Payment service returned code %d: %s", resp.StatusCode, string(bodyBytes))
+		
+		// Parse payment service error message if present
+		var errResp struct {
+			Message string `json:"message"`
+		}
+		if err := json.Unmarshal(bodyBytes, &errResp); err == nil && errResp.Message != "" {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(resp.StatusCode)
+			w.Write(bodyBytes)
+			return
+		}
+		
+		http.Error(w, fmt.Sprintf(`{"message":"Payment rejected: %s"}`, string(bodyBytes)), resp.StatusCode)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	w.Write(bodyBytes)
+}
+
+func generateUUID() string {
+	b := make([]byte, 16)
+	_, err := io.ReadFull(rand.Reader, b)
+	if err != nil {
+		return time.Now().Format("20060102150405") + "-1111-2222-3333-444455556666"
+	}
+	b[6] = (b[6] & 0x0f) | 0x40 // Version 4
+	b[8] = (b[8] & 0x3f) | 0x80 // Variant 10
+	return fmt.Sprintf("%x-%x-%x-%x-%x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:])
 }

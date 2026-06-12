@@ -174,6 +174,7 @@ func main() {
 			"credit_limit": acc.CreditLimit,
 			"balance":      balance,
 			"account_id":   acc.ID,
+			"owner_id":     acc.OwnerID,
 		})
 	}))
 
